@@ -1,2 +1,2 @@
 # destream_json
-Rust library for (de)serialization of a JSON stream
+Rust library for (de)serializing of a JSON stream

@@ -1,0 +1,15 @@
+[package]
+name = "destream_json"
+version = "0.1.0"
+authors = ["haydnv"]
+edition = "2018"
+license-file = "LICENSE"
+description = "Library for (de)serializing a JSON stream"
+repository = "http://github.com/haydnv/destream_json"
+readme = "README.md"
+
+categories = ["asynchronous", "encoding", "parser-implementations", "parsing", "rust-patterns", "web-programming"]
+keywords = ["json", "stream", "streaming", "serialize", "deserialize"]
+
+
+[dependencies]
