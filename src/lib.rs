@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, Visitor};
@@ -14,7 +15,7 @@ const LIST_BEGIN: u8 = b'[';
 const NULL: &[u8] = b"null";
 const MAP_BEGIN: u8 = b'{';
 const NUMERIC: [u8; 15] = [
-    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', DECIMAL, b'e', b'E',
+    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'e', b'E', DECIMAL,
 ];
 const QUOTE: u8 = b'"';
 
@@ -85,6 +86,30 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
             }
         }
     }
+
+    async fn parse_int<I: FromStr>(&mut self) -> Result<I, Error>
+    where
+        <I as FromStr>::Err: fmt::Display,
+    {
+        let mut i = 0;
+        loop {
+            while i == self.buffer.len() {
+                self.buffer().await?;
+            }
+
+            if self.numeric.contains(&self.buffer[i]) && self.buffer[i] != DECIMAL {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        let n =
+            String::from_utf8(self.buffer.drain(0..i).collect()).map_err(Error::invalid_utf8)?;
+
+        n.parse()
+            .map_err(|e| de::Error::invalid_value(e, "8-bit integer"))
+    }
 }
 
 #[async_trait]
@@ -137,24 +162,49 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         }
     }
 
-    async fn decode_bool<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_bool<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        while self.buffer.len() < 4 {
+            self.buffer().await?;
+        }
+
+        if self.buffer.starts_with(TRUE) {
+            self.buffer.drain(0..4);
+            return visitor.visit_bool(true);
+        }
+
+        while self.buffer.len() < 5 {
+            self.buffer().await?;
+        }
+
+        if self.buffer.starts_with(FALSE) {
+            self.buffer.drain(0..5);
+            return visitor.visit_bool(false);
+        }
+
+        let unknown =
+            String::from_utf8(self.buffer.drain(0..5).collect()).map_err(Error::invalid_utf8)?;
+
+        Err(de::Error::invalid_value(unknown, "a boolean"))
     }
 
-    async fn decode_i8<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_i8<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let i = self.parse_int().await?;
+        visitor.visit_i8(i)
     }
 
-    async fn decode_i16<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_i16<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let i = self.parse_int().await?;
+        visitor.visit_i16(i)
     }
 
-    async fn decode_i32<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_i32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let i = self.parse_int().await?;
+        visitor.visit_i32(i)
     }
 
-    async fn decode_i64<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_i64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let i = self.parse_int().await?;
+        visitor.visit_i64(i)
     }
 
     async fn decode_u8<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
