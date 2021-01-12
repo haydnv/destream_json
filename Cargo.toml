@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["haydnv"]
 edition = "2018"
 license-file = "LICENSE"
-description = "Library for (de)serializing a JSON stream"
+description = "Library for decoding & encoding a JSON stream"
 repository = "http://github.com/haydnv/destream_json"
 readme = "README.md"
 
@@ -13,3 +13,6 @@ keywords = ["json", "stream", "streaming", "serialize", "deserialize"]
 
 
 [dependencies]
+async-trait = "0.1"
+destream = {path = "../destream"}
+futures = "0.3"
