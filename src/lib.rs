@@ -87,9 +87,9 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         }
     }
 
-    async fn parse_int<I: FromStr>(&mut self) -> Result<I, Error>
-    where
-        <I as FromStr>::Err: fmt::Display,
+    async fn parse_number<N: FromStr>(&mut self) -> Result<N, Error>
+        where
+            <N as FromStr>::Err: fmt::Display,
     {
         let mut i = 0;
         loop {
@@ -97,7 +97,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
                 self.buffer().await?;
             }
 
-            if self.numeric.contains(&self.buffer[i]) && self.buffer[i] != DECIMAL {
+            if self.numeric.contains(&self.buffer[i]) {
                 i += 1;
             } else {
                 break;
@@ -188,47 +188,53 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
     }
 
     async fn decode_i8<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        let i = self.parse_int().await?;
+        let i = self.parse_number().await?;
         visitor.visit_i8(i)
     }
 
     async fn decode_i16<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        let i = self.parse_int().await?;
+        let i = self.parse_number().await?;
         visitor.visit_i16(i)
     }
 
     async fn decode_i32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        let i = self.parse_int().await?;
+        let i = self.parse_number().await?;
         visitor.visit_i32(i)
     }
 
     async fn decode_i64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        let i = self.parse_int().await?;
+        let i = self.parse_number().await?;
         visitor.visit_i64(i)
     }
 
-    async fn decode_u8<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_u8<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let u = self.parse_number().await?;
+        visitor.visit_u8(u)
     }
 
-    async fn decode_u16<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_u16<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let u = self.parse_number().await?;
+        visitor.visit_u16(u)
     }
 
-    async fn decode_u32<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_u32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let u = self.parse_number().await?;
+        visitor.visit_u32(u)
     }
 
-    async fn decode_u64<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_u64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let u = self.parse_number().await?;
+        visitor.visit_u64(u)
     }
 
-    async fn decode_f32<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_f32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let f = self.parse_number().await?;
+        visitor.visit_f32(f)
     }
 
-    async fn decode_f64<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_f64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let f = self.parse_number().await?;
+        visitor.visit_f64(f)
     }
 
     async fn decode_char<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
