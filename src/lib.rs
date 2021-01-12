@@ -88,8 +88,8 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
     }
 
     async fn parse_number<N: FromStr>(&mut self) -> Result<N, Error>
-        where
-            <N as FromStr>::Err: fmt::Display,
+    where
+        <N as FromStr>::Err: fmt::Display,
     {
         let mut i = 0;
         loop {
@@ -108,7 +108,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
             String::from_utf8(self.buffer.drain(0..i).collect()).map_err(Error::invalid_utf8)?;
 
         n.parse()
-            .map_err(|e| de::Error::invalid_value(e, "8-bit integer"))
+            .map_err(|e| de::Error::invalid_value(e, std::any::type_name::<N>()))
     }
 }
 
@@ -237,12 +237,36 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         visitor.visit_f64(f)
     }
 
-    async fn decode_char<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
-    }
+    async fn decode_string<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        while self.buffer.is_empty() {
+            self.buffer().await?;
+        }
 
-    async fn decode_string<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+        let next_char = self.buffer.remove(0);
+        if next_char != QUOTE {
+            return Err(de::Error::invalid_value(
+                next_char as char,
+                "a double-quoted string",
+            ));
+        }
+
+        let mut i = 0;
+        loop {
+            while self.buffer.is_empty() {
+                self.buffer().await?;
+            }
+
+            if self.buffer[i] == QUOTE {
+                break;
+            } else {
+                i += 1;
+            }
+        }
+
+        let s =
+            String::from_utf8(self.buffer.drain(0..i).collect()).map_err(Error::invalid_utf8)?;
+
+        visitor.visit_string(s)
     }
 
     async fn decode_byte_buf<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
