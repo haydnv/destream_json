@@ -433,6 +433,14 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         visitor.visit_seq(access).await
     }
 
+    async fn decode_unit_struct<V: Visitor>(
+        &mut self,
+        _name: &'static str,
+        _visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        unimplemented!()
+    }
+
     async fn decode_tuple<V: Visitor>(
         &mut self,
         len: usize,
@@ -469,5 +477,31 @@ impl<S> From<S> for Decoder<S> {
             buffer: vec![],
             numeric: NUMERIC.iter().cloned().collect(),
         }
+    }
+}
+
+pub async fn from_stream<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
+    source: S,
+) -> Result<T, Error> {
+    T::from_stream(&mut Decoder::from(source)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::future;
+    use futures::stream;
+
+    use super::*;
+
+    async fn decode<T: FromStream>(encoded: &str) -> T {
+        from_stream(stream::once(future::ready(encoded.as_bytes().to_vec())))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_primitives() {
+        assert_eq!(decode::<bool>("true").await, true);
+        assert_eq!(decode::<bool>("false").await, false);
     }
 }
