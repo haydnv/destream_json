@@ -6,8 +6,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use destream::{de, FromStream, Visitor};
-use futures::future;
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{Stream, StreamExt};
 
 const COLON: u8 = b':';
 const COMMA: u8 = b',';
@@ -61,59 +60,50 @@ impl fmt::Display for Error {
     }
 }
 
-struct MapAccess<S> {
-    decoder: Decoder<S>,
+struct MapAccess<'a, S> {
+    decoder: &'a mut Decoder<S>,
     size_hint: Option<usize>,
 }
 
-impl<S> MapAccess<S> {
-    fn new(decoder: Decoder<S>, size_hint: Option<usize>) -> Self {
-        Self { decoder, size_hint }
+impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> MapAccess<'a, S> {
+    async fn new(
+        decoder: &'a mut Decoder<S>,
+        size_hint: Option<usize>,
+    ) -> Result<MapAccess<'a, S>, Error> {
+        decoder.expect_byte(MAP_BEGIN).await?;
+
+        Ok(MapAccess { decoder, size_hint })
     }
 }
 
 #[async_trait]
-impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::MapAccess for MapAccess<S> {
+impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::MapAccess for MapAccess<'a, S> {
     type Error = Error;
-    type Stream = futures::stream::Once<future::Ready<Vec<u8>>>;
 
-    async fn next_key<K: FromStream<Self::Stream, Error = Error>>(
-        &mut self,
-    ) -> Result<Option<K>, Error> {
+    async fn next_key<K: FromStream>(&mut self) -> Result<Option<K>, Error> {
         self.decoder.expect_whitespace().await?;
 
         if self.decoder.maybe_byte(MAP_END).await? {
             return Ok(None);
         }
 
-        let key = self.decoder.buffer_string().await?;
-        let key = K::from_stream(stream::once(future::ready(key))).await?;
+        let key = K::from_stream(self.decoder).await?;
         Ok(Some(key))
     }
 
-    async fn next_value<V: FromStream<Self::Stream, Error = Error>>(&mut self) -> Result<V, Error> {
+    async fn next_value<V: FromStream>(&mut self) -> Result<V, Error> {
         self.decoder.expect_whitespace().await?;
         self.decoder.expect_byte(COLON).await?;
         self.decoder.expect_whitespace().await?;
 
-        let value = if self.decoder.buffer[0] == QUOTE {
-            self.decoder.buffer_string().await?
-        } else {
-            self.decoder.buffer_while(|b| b != COMMA).await?
-        };
+        let value = V::from_stream(self.decoder).await?;
 
-        self.decoder.expect_byte(COMMA).await?;
+        self.decoder.expect_comma_or(MAP_END).await?;
 
-        let value = V::from_stream(stream::once(future::ready(value))).await?;
         Ok(value)
     }
 
-    async fn next_entry<
-        K: FromStream<Self::Stream, Error = Error>,
-        V: FromStream<Self::Stream, Error = Error>,
-    >(
-        &mut self,
-    ) -> Result<Option<(K, V)>, Error> {
+    async fn next_entry<K: FromStream, V: FromStream>(&mut self) -> Result<Option<(K, V)>, Error> {
         if let Some(key) = self.next_key().await? {
             let value = self.next_value().await?;
             Ok(Some((key, value)))
@@ -127,32 +117,36 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::MapAccess for MapAccess<S> {
     }
 }
 
-struct SeqAccess<S> {
-    decoder: Decoder<S>,
+struct SeqAccess<'a, S> {
+    decoder: &'a mut Decoder<S>,
     size_hint: Option<usize>,
 }
 
-impl<S> SeqAccess<S> {
-    fn new(decoder: Decoder<S>, size_hint: Option<usize>) -> Self {
-        Self { decoder, size_hint }
+impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> SeqAccess<'a, S> {
+    async fn new(
+        decoder: &'a mut Decoder<S>,
+        size_hint: Option<usize>,
+    ) -> Result<SeqAccess<'a, S>, Error> {
+        decoder.expect_byte(LIST_BEGIN).await?;
+
+        Ok(SeqAccess { decoder, size_hint })
     }
 }
 
 #[async_trait]
-impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::SeqAccess for SeqAccess<S> {
+impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::SeqAccess for SeqAccess<'a, S> {
     type Error = Error;
-    type Stream = futures::stream::Once<future::Ready<Vec<u8>>>;
 
-    async fn next_element<T: FromStream<Self::Stream, Error = Self::Error>>(
-        &mut self,
-    ) -> Result<Option<T>, Self::Error> {
+    async fn next_element<T: FromStream>(&mut self) -> Result<Option<T>, Self::Error> {
         self.decoder.expect_whitespace().await?;
 
         if self.decoder.maybe_byte(LIST_END).await? {
             return Ok(None);
         }
 
-        todo!();
+        let value = T::from_stream(self.decoder).await?;
+        self.decoder.expect_comma_or(LIST_END).await?;
+        Ok(Some(value))
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -214,7 +208,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         Ok(self.buffer.drain(0..i).collect())
     }
 
-    async fn decode_number<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Error> {
+    async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let mut i = 0;
         loop {
             if self.buffer[i] == DECIMAL {
@@ -239,8 +233,25 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         if next_char == byte {
             Ok(())
         } else {
-            Err(de::Error::invalid_value(next_char as char, byte as char))
+            Err(de::Error::invalid_value(
+                next_char as char,
+                &format!("{}", (byte as char)),
+            ))
         }
+    }
+
+    async fn expect_comma_or(&mut self, byte: u8) -> Result<(), Error> {
+        self.expect_whitespace().await?;
+
+        while self.buffer.is_empty() {
+            self.buffer().await?;
+        }
+
+        if self.buffer[0] != byte {
+            self.expect_byte(COMMA).await?;
+        }
+
+        Ok(())
     }
 
     async fn expect_whitespace(&mut self) -> Result<(), Error> {
@@ -270,7 +281,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         let n = String::from_utf8(n).map_err(Error::invalid_utf8)?;
 
         n.parse()
-            .map_err(|e| de::Error::invalid_value(e, std::any::type_name::<N>()))
+            .map_err(|e| de::Error::invalid_value(e, &std::any::type_name::<N>()))
     }
 
     async fn parse_string(&mut self) -> Result<String, Error> {
@@ -283,7 +294,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
 impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
     type Error = Error;
 
-    async fn decode_any<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         while self.buffer.is_empty() {
             self.buffer().await?;
         }
@@ -319,17 +330,18 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
                 if self.buffer.starts_with(FALSE) {
                     self.decode_bool(visitor).await
                 } else {
-                    let s = String::from_utf8(self.buffer.into()).map_err(Error::invalid_utf8)?;
+                    let s = String::from_utf8(self.buffer[0..5].to_vec())
+                        .map_err(Error::invalid_utf8)?;
                     Err(de::Error::invalid_value(
                         s,
-                        std::any::type_name::<V::Value>(),
+                        &std::any::type_name::<V::Value>(),
                     ))
                 }
             }
         }
     }
 
-    async fn decode_bool<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_bool<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         while self.buffer.len() < 4 {
             self.buffer().await?;
         }
@@ -350,93 +362,102 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
 
         let unknown = String::from_utf8(self.buffer[0..5].to_vec()).map_err(Error::invalid_utf8)?;
 
-        Err(de::Error::invalid_value(unknown, "a boolean"))
+        Err(de::Error::invalid_value(unknown, &"a boolean"))
     }
 
-    async fn decode_i8<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_i8<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let i = self.parse_number().await?;
         visitor.visit_i8(i)
     }
 
-    async fn decode_i16<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_i16<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let i = self.parse_number().await?;
         visitor.visit_i16(i)
     }
 
-    async fn decode_i32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_i32<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let i = self.parse_number().await?;
         visitor.visit_i32(i)
     }
 
-    async fn decode_i64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_i64<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let i = self.parse_number().await?;
         visitor.visit_i64(i)
     }
 
-    async fn decode_u8<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_u8<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let u = self.parse_number().await?;
         visitor.visit_u8(u)
     }
 
-    async fn decode_u16<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_u16<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let u = self.parse_number().await?;
         visitor.visit_u16(u)
     }
 
-    async fn decode_u32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_u32<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let u = self.parse_number().await?;
         visitor.visit_u32(u)
     }
 
-    async fn decode_u64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_u64<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let u = self.parse_number().await?;
         visitor.visit_u64(u)
     }
 
-    async fn decode_f32<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_f32<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let f = self.parse_number().await?;
         visitor.visit_f32(f)
     }
 
-    async fn decode_f64<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_f64<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let f = self.parse_number().await?;
         visitor.visit_f64(f)
     }
 
-    async fn decode_string<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let s = self.parse_string().await?;
         visitor.visit_string(s)
     }
 
-    async fn decode_byte_buf<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_byte_buf<V: Visitor>(&mut self, _visitor: V) -> Result<V::Value, Self::Error> {
         unimplemented!()
     }
 
-    async fn decode_option<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_option<V: Visitor>(&mut self, _visitor: V) -> Result<V::Value, Self::Error> {
         unimplemented!()
     }
 
-    async fn decode_seq<V: Visitor>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_seq(SeqAccess::new(self, None)).await
+    async fn decode_seq<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_seq(access).await
     }
 
     async fn decode_tuple<V: Visitor>(
-        self,
+        &mut self,
         len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        visitor.visit_seq(SeqAccess::new(self, Some(len))).await
+        let access = SeqAccess::new(self, Some(len)).await?;
+        visitor.visit_seq(access).await
     }
 
-    async fn decode_map<V: Visitor>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_map(MapAccess::new(self, None)).await
+    async fn decode_map<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let access = MapAccess::new(self, None).await?;
+        visitor.visit_map(access).await
     }
 
-    async fn decode_identifier<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_identifier<V: Visitor>(
+        &mut self,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error> {
         unimplemented!()
     }
 
-    async fn decode_ignored_any<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+    async fn decode_ignored_any<V: Visitor>(
+        &mut self,
+        _visitor: V,
+    ) -> Result<V::Value, Self::Error> {
         unimplemented!()
     }
 }
