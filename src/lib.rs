@@ -16,6 +16,7 @@ const ESCAPE: u8 = b'\\';
 const FALSE: &[u8] = b"false";
 const TRUE: &[u8] = b"true";
 const LIST_BEGIN: u8 = b'[';
+const LIST_END: u8 = b']';
 const NULL: &[u8] = b"null";
 const MAP_BEGIN: u8 = b'{';
 const MAP_END: u8 = b'}';
@@ -73,59 +74,36 @@ impl<S> MapAccess<S> {
 
 #[async_trait]
 impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::MapAccess for MapAccess<S> {
-    type Stream = futures::stream::Once<future::Ready<Vec<u8>>>;
     type Error = Error;
+    type Stream = futures::stream::Once<future::Ready<Vec<u8>>>;
 
     async fn next_key<K: FromStream<Self::Stream, Error = Error>>(
         &mut self,
     ) -> Result<Option<K>, Error> {
-        while self.decoder.buffer.is_empty() {
-            self.decoder.buffer().await?;
-        }
+        self.decoder.expect_whitespace().await?;
 
-        if self.decoder.buffer[0] == MAP_END {
-            self.decoder.buffer.remove(0);
+        if self.decoder.maybe_byte(MAP_END).await? {
             return Ok(None);
         }
 
-        let key = self.decoder.parse_string().await?;
-        let key = K::from_stream(stream::once(future::ready(key.into_bytes()))).await?;
+        let key = self.decoder.buffer_string().await?;
+        let key = K::from_stream(stream::once(future::ready(key))).await?;
         Ok(Some(key))
     }
 
     async fn next_value<V: FromStream<Self::Stream, Error = Error>>(&mut self) -> Result<V, Error> {
-        while self.decoder.buffer.is_empty() {
-            self.decoder.buffer().await?;
-        }
+        self.decoder.expect_whitespace().await?;
+        self.decoder.expect_byte(COLON).await?;
+        self.decoder.expect_whitespace().await?;
 
-        let next_char = self.decoder.buffer.remove(0);
-        if next_char != COLON {
-            return Err(de::Error::invalid_value(next_char, ":"));
-        }
+        let value = if self.decoder.buffer[0] == QUOTE {
+            self.decoder.buffer_string().await?
+        } else {
+            self.decoder.buffer_while(|b| b != COMMA).await?
+        };
 
-        let mut i = 0;
-        let mut in_string = false;
-        loop {
-            while self.decoder.buffer.is_empty() {
-                self.decoder.buffer().await?;
-            }
+        self.decoder.expect_byte(COMMA).await?;
 
-            if in_string {
-                if self.decoder.buffer[i] == QUOTE {
-                    in_string = i == 0 || (self.decoder.buffer[i - 1] != ESCAPE);
-                }
-            } else if self.decoder.buffer[i] == COMMA || self.decoder.buffer[i] == MAP_END {
-                break;
-            } else {
-                if self.decoder.buffer[i] == QUOTE {
-                    in_string = true;
-                }
-            }
-
-            i += 1;
-        }
-
-        let value = self.decoder.buffer.drain(0..i).collect();
         let value = V::from_stream(stream::once(future::ready(value))).await?;
         Ok(value)
     }
@@ -149,6 +127,39 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::MapAccess for MapAccess<S> {
     }
 }
 
+struct SeqAccess<S> {
+    decoder: Decoder<S>,
+    size_hint: Option<usize>,
+}
+
+impl<S> SeqAccess<S> {
+    fn new(decoder: Decoder<S>, size_hint: Option<usize>) -> Self {
+        Self { decoder, size_hint }
+    }
+}
+
+#[async_trait]
+impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::SeqAccess for SeqAccess<S> {
+    type Error = Error;
+    type Stream = futures::stream::Once<future::Ready<Vec<u8>>>;
+
+    async fn next_element<T: FromStream<Self::Stream, Error = Self::Error>>(
+        &mut self,
+    ) -> Result<Option<T>, Self::Error> {
+        self.decoder.expect_whitespace().await?;
+
+        if self.decoder.maybe_byte(LIST_END).await? {
+            return Ok(None);
+        }
+
+        todo!();
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        self.size_hint
+    }
+}
+
 pub struct Decoder<S> {
     source: S,
     buffer: Vec<u8>,
@@ -163,6 +174,44 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         } else {
             Err(Error::unexpected_end())
         }
+    }
+
+    async fn buffer_string(&mut self) -> Result<Vec<u8>, Error> {
+        self.expect_byte(QUOTE).await?;
+
+        let mut i = 0;
+        loop {
+            while self.buffer.is_empty() {
+                self.buffer().await?;
+            }
+
+            if self.buffer[i] == QUOTE && (i == 0 || self.buffer[i - 1] != ESCAPE) {
+                break;
+            } else {
+                i += 1;
+            }
+        }
+
+        let s = self.buffer.drain(0..i).collect();
+        self.buffer.remove(0);
+        Ok(s)
+    }
+
+    async fn buffer_while<F: Fn(u8) -> bool>(&mut self, cond: F) -> Result<Vec<u8>, Error> {
+        let mut i = 0;
+        loop {
+            while self.buffer.is_empty() {
+                self.buffer().await?;
+            }
+
+            if cond(self.buffer[i]) {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(self.buffer.drain(0..i).collect())
     }
 
     async fn decode_number<V: Visitor>(mut self, visitor: V) -> Result<V::Value, Error> {
@@ -181,57 +230,52 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         }
     }
 
+    async fn expect_byte(&mut self, byte: u8) -> Result<(), Error> {
+        while self.buffer.is_empty() {
+            self.buffer().await?;
+        }
+
+        let next_char = self.buffer.remove(0);
+        if next_char == byte {
+            Ok(())
+        } else {
+            Err(de::Error::invalid_value(next_char as char, byte as char))
+        }
+    }
+
+    async fn expect_whitespace(&mut self) -> Result<(), Error> {
+        self.buffer_while(|b| (b as char).is_whitespace()).await?;
+        Ok(())
+    }
+
+    async fn maybe_byte(&mut self, byte: u8) -> Result<bool, Error> {
+        while self.buffer.is_empty() {
+            self.buffer().await?;
+        }
+
+        if self.buffer[0] == byte {
+            self.buffer.remove(0);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     async fn parse_number<N: FromStr>(&mut self) -> Result<N, Error>
     where
         <N as FromStr>::Err: fmt::Display,
     {
-        let mut i = 0;
-        loop {
-            while i == self.buffer.len() {
-                self.buffer().await?;
-            }
-
-            if self.numeric.contains(&self.buffer[i]) {
-                i += 1;
-            } else {
-                break;
-            }
-        }
-
-        let n =
-            String::from_utf8(self.buffer.drain(0..i).collect()).map_err(Error::invalid_utf8)?;
+        let numeric = self.numeric.clone();
+        let n = self.buffer_while(|b| numeric.contains(&b)).await?;
+        let n = String::from_utf8(n).map_err(Error::invalid_utf8)?;
 
         n.parse()
             .map_err(|e| de::Error::invalid_value(e, std::any::type_name::<N>()))
     }
 
     async fn parse_string(&mut self) -> Result<String, Error> {
-        while self.buffer.is_empty() {
-            self.buffer().await?;
-        }
-
-        let next_char = self.buffer.remove(0);
-        if next_char != QUOTE {
-            return Err(de::Error::invalid_value(
-                next_char as char,
-                "a double-quoted string",
-            ));
-        }
-
-        let mut i = 0;
-        loop {
-            while self.buffer.is_empty() {
-                self.buffer().await?;
-            }
-
-            if self.buffer[i] == QUOTE {
-                break;
-            } else {
-                i += 1;
-            }
-        }
-
-        String::from_utf8(self.buffer.drain(0..i).collect()).map_err(Error::invalid_utf8)
+        let s = self.buffer_string().await?;
+        String::from_utf8(s).map_err(Error::invalid_utf8)
     }
 }
 
@@ -304,8 +348,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
             return visitor.visit_bool(false);
         }
 
-        let unknown =
-            String::from_utf8(self.buffer.drain(0..5).collect()).map_err(Error::invalid_utf8)?;
+        let unknown = String::from_utf8(self.buffer[0..5].to_vec()).map_err(Error::invalid_utf8)?;
 
         Err(de::Error::invalid_value(unknown, "a boolean"))
     }
@@ -373,16 +416,16 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         unimplemented!()
     }
 
-    async fn decode_seq<V: Visitor>(self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_seq<V: Visitor>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        visitor.visit_seq(SeqAccess::new(self, None)).await
     }
 
     async fn decode_tuple<V: Visitor>(
         self,
-        _len: usize,
-        _visitor: V,
+        len: usize,
+        visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+        visitor.visit_seq(SeqAccess::new(self, Some(len))).await
     }
 
     async fn decode_map<V: Visitor>(self, visitor: V) -> Result<V::Value, Self::Error> {
