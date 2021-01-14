@@ -1,4 +1,4 @@
-//! Library for decoding and encoding JSON streams.
+//! Decode a JSON stream to a Rust data structure.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -24,6 +24,7 @@ const NUMERIC: [u8; 15] = [
 ];
 const QUOTE: u8 = b'"';
 
+/// An error encountered while decoding a JSON stream.
 pub struct Error {
     message: String,
 }
@@ -156,6 +157,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::SeqAccess for SeqAcc
     }
 }
 
+/// A structure that decodes Rust values from a JSON stream.
 pub struct Decoder<S> {
     source: Fuse<S>,
     buffer: Vec<u8>,
@@ -192,6 +194,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
 
         let s = self.buffer.drain(0..i).collect();
         self.buffer.remove(0); // process the end quote
+        self.buffer.shrink_to_fit();
         Ok(s)
     }
 
@@ -211,7 +214,9 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
             }
         }
 
-        self.buffer.drain(0..i).collect()
+        let buffered = self.buffer.drain(0..i).collect();
+        self.buffer.shrink_to_fit();
+        buffered
     }
 
     async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
@@ -572,6 +577,7 @@ impl<S: Stream> From<S> for Decoder<S> {
     }
 }
 
+/// Decode the given JSON-encoded stream of bytes into an instance of `T`.
 pub async fn from_stream<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
     source: S,
 ) -> Result<T, Error> {
