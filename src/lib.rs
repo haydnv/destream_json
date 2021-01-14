@@ -174,7 +174,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
 
         let mut i = 0;
         loop {
-            while self.buffer.is_empty() && !self.source.is_done() {
+            while i >= self.buffer.len() && !self.source.is_done() {
                 self.buffer().await;
             }
 
@@ -191,7 +191,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         }
 
         let s = self.buffer.drain(0..i).collect();
-        self.buffer.remove(0);
+        self.buffer.remove(0); // process the end quote
         Ok(s)
     }
 
@@ -588,43 +588,37 @@ mod tests {
 
     use super::*;
 
-    async fn decode<T: FromStream>(encoded: &str) -> T {
-        from_stream(stream::once(future::ready(encoded.as_bytes().to_vec())))
-            .await
-            .unwrap()
+    async fn run_test<T: FromStream + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
+        for i in 1..encoded.len() {
+            let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(i);
+            let actual: T = from_stream(source).await.unwrap();
+            assert_eq!(expected, actual)
+        }
     }
 
     #[tokio::test]
     async fn test_json_primitives() {
-        assert_eq!(decode::<bool>("true").await, true);
-        assert_eq!(decode::<bool>("false").await, false);
+        run_test("true", true).await;
+        run_test("false", false).await;
 
-        assert_eq!(decode::<u8>("1").await, 1);
-        assert_eq!(decode::<u16>(" 2 ").await, 2);
-        assert_eq!(decode::<u32>("4658 ").await, 4658);
-        assert_eq!(decode::<u64>(&2u64.pow(63).to_string()).await, 2u64.pow(63));
+        run_test("1", 1u8).await;
+        run_test(" 2 ", 2u16).await;
+        run_test("4658 ", 4658_u32).await;
+        run_test(&2u64.pow(63).to_string(), 2u64.pow(63)).await;
 
-        assert_eq!(decode::<i8>("-1").await, -1);
-        assert_eq!(decode::<i16>("\t\n-32").await, -32);
-        assert_eq!(decode::<i32>("53\t").await, 53);
-        assert_eq!(
-            decode::<i64>(&(-2i64).pow(63).to_string()).await,
-            (-2i64).pow(63)
-        );
+        run_test("-1", -1i8).await;
+        run_test("\t\n-32", -32i16).await;
+        run_test("53\t", 53i32).await;
+        run_test(&(-2i64).pow(63).to_string(), (-2i64).pow(63)).await;
 
-        assert_eq!(decode::<f32>("2e2").await, 2e2);
-        assert_eq!(decode::<f32>("-2e-3").await, -2e-3);
-        assert_eq!(decode::<f64>("3.14").await, 3.14);
-        assert_eq!(decode::<f32>("-1.414e4").await, -1.414e4);
+        run_test("2e2", 2e2_f32).await;
+        run_test("-2e-3", -2e-3_f64).await;
+        run_test("3.14", 3.14_f32).await;
+        run_test("-1.414e4", -1.414e4_f64).await;
 
-        assert_eq!(
-            decode::<String>("\"hello world\"").await,
-            "hello world".to_string()
-        );
-        assert_eq!(
-            decode::<String>("\t\r\n\" hello world \"").await,
-            " hello world ".to_string()
-        );
+        run_test("\"one \\\" two\"", "one \\\" two".to_string()).await;
+
+        run_test("\t\r\n\" hello world \"", " hello world ".to_string()).await;
     }
 
     #[tokio::test]
@@ -658,35 +652,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_seq() {
-        assert_eq!(decode::<Vec<u8>>("[1, 2, 3]").await, vec![1, 2, 3]);
+        run_test("[1, 2, 3]", vec![1, 2, 3]).await;
 
-        assert_eq!(
-            decode::<(bool, i16, String)>("\t[\r\n\rtrue,\r\n\t-1,\r\n\t\"hello world. \"\r\n]")
-                .await,
-            (true, -1i16, "hello world. ".to_string())
-        );
-
-        assert_eq!(
-            decode::<[f32; 3]>(" [ 1.23, 4e3, -3.45]\n").await,
-            [1.23, 4e3, -3.45]
-        );
-
-        assert_eq!(
-            decode::<HashSet<String>>("[\"one\", \"two\", \"three\"]").await,
-            HashSet::from_iter(vec!["one", "two", "three"].into_iter().map(String::from))
+        run_test(
+            "\t[\r\n\rtrue,\r\n\t-1,\r\n\t\"hello world. \"\r\n]",
+            (true, -1i16, "hello world. ".to_string()),
         )
+        .await;
+
+        run_test(" [ 1.23, 4e3, -3.45]\n", [1.23, 4e3, -3.45]).await;
+
+        run_test(
+            "[\"one\", \"two\", \"three\"]",
+            HashSet::<String>::from_iter(vec!["one", "two", "three"].into_iter().map(String::from)),
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn test_map() {
-        assert_eq!(
-            decode::<HashMap<String, bool>>("\r\n\t{ \"k1\":\ttrue, \"k2\":false}").await,
-            HashMap::from_iter(vec![("k1".to_string(), true), ("k2".to_string(), false)])
-        );
+        run_test(
+            "\r\n\t{ \"k1\":\ttrue, \"k2\":false}",
+            HashMap::<String, bool>::from_iter(vec![
+                ("k1".to_string(), true),
+                ("k2".to_string(), false),
+            ]),
+        )
+        .await;
 
-        assert_eq!(
-            decode::<BTreeMap<i32, Option<bool>>>("\r\n\t{ -1:\ttrue, 2:null}").await,
-            BTreeMap::from_iter(vec![(-1, Some(true)), (2, None),])
-        );
+        run_test(
+            "\r\n\t{ -1:\ttrue, 2:null}",
+            BTreeMap::<i32, Option<bool>>::from_iter(vec![(-1, Some(true)), (2, None)]),
+        )
+        .await;
     }
 }
