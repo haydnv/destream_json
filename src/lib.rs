@@ -70,6 +70,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> MapAccess<'a, S> {
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
     ) -> Result<MapAccess<'a, S>, Error> {
+        decoder.expect_whitespace().await?;
         decoder.expect_byte(MAP_BEGIN).await?;
 
         Ok(MapAccess { decoder, size_hint })
@@ -127,6 +128,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> SeqAccess<'a, S> {
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
     ) -> Result<SeqAccess<'a, S>, Error> {
+        decoder.expect_whitespace().await?;
         decoder.expect_byte(LIST_BEGIN).await?;
 
         Ok(SeqAccess { decoder, size_hint })
@@ -176,10 +178,13 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
                 self.buffer().await;
             }
 
-            if i < self.buffer.len() && self.buffer[i] == QUOTE && (i == 0 || self.buffer[i - 1] != ESCAPE) {
+            if i < self.buffer.len()
+                && self.buffer[i] == QUOTE
+                && (i == 0 || self.buffer[i - 1] != ESCAPE)
+            {
                 break;
             } else if self.source.is_done() {
-                return Err(Error::unexpected_end())
+                return Err(Error::unexpected_end());
             } else {
                 i += 1;
             }
@@ -519,6 +524,8 @@ pub async fn from_stream<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream
 
 #[cfg(test)]
 mod tests {
+    use std::iter::FromIterator;
+
     use futures::future;
     use futures::stream;
 
@@ -543,14 +550,44 @@ mod tests {
         assert_eq!(decode::<i8>("-1").await, -1);
         assert_eq!(decode::<i16>("\t\n-32").await, -32);
         assert_eq!(decode::<i32>("53\t").await, 53);
-        assert_eq!(decode::<i64>(&(-2i64).pow(63).to_string()).await, (-2i64).pow(63));
+        assert_eq!(
+            decode::<i64>(&(-2i64).pow(63).to_string()).await,
+            (-2i64).pow(63)
+        );
 
         assert_eq!(decode::<f32>("2e2").await, 2e2);
         assert_eq!(decode::<f32>("-2e-3").await, -2e-3);
         assert_eq!(decode::<f64>("3.14").await, 3.14);
         assert_eq!(decode::<f32>("-1.414e4").await, -1.414e4);
 
-        assert_eq!(decode::<String>("\"hello world\"").await, "hello world".to_string());
-        assert_eq!(decode::<String>("\t\r\n\" hello world \"").await, " hello world ".to_string());
+        assert_eq!(
+            decode::<String>("\"hello world\"").await,
+            "hello world".to_string()
+        );
+        assert_eq!(
+            decode::<String>("\t\r\n\" hello world \"").await,
+            " hello world ".to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_seq() {
+        assert_eq!(decode::<Vec<u8>>("[1, 2, 3]").await, vec![1, 2, 3]);
+
+        assert_eq!(
+            decode::<(bool, i16, String)>("\t[\r\n\rtrue,\r\n\t-1,\r\n\t\"hello world. \"\r\n]")
+                .await,
+            (true, -1i16, "hello world. ".to_string())
+        );
+
+        assert_eq!(
+            decode::<[f32; 3]>(" [ 1.23, 4e3, -3.45]\n").await,
+            [1.23, 4e3, -3.45]
+        );
+
+        assert_eq!(
+            decode::<HashSet<String>>("[\"one\", \"two\", \"three\"]").await,
+            HashSet::from_iter(vec!["one", "two", "three"].into_iter().map(String::from))
+        )
     }
 }
