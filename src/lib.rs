@@ -70,7 +70,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> MapAccess<'a, S> {
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
     ) -> Result<MapAccess<'a, S>, Error> {
-        decoder.expect_whitespace().await?;
+        decoder.expect_whitespace().await;
         decoder.expect_byte(MAP_BEGIN).await?;
 
         Ok(MapAccess { decoder, size_hint })
@@ -82,7 +82,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::MapAccess for MapAcc
     type Error = Error;
 
     async fn next_key<K: FromStream>(&mut self) -> Result<Option<K>, Error> {
-        self.decoder.expect_whitespace().await?;
+        self.decoder.expect_whitespace().await;
 
         if self.decoder.maybe_byte(MAP_END).await? {
             return Ok(None);
@@ -93,9 +93,9 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::MapAccess for MapAcc
     }
 
     async fn next_value<V: FromStream>(&mut self) -> Result<V, Error> {
-        self.decoder.expect_whitespace().await?;
+        self.decoder.expect_whitespace().await;
         self.decoder.expect_byte(COLON).await?;
-        self.decoder.expect_whitespace().await?;
+        self.decoder.expect_whitespace().await;
 
         let value = V::from_stream(self.decoder).await?;
 
@@ -128,7 +128,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> SeqAccess<'a, S> {
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
     ) -> Result<SeqAccess<'a, S>, Error> {
-        decoder.expect_whitespace().await?;
+        decoder.expect_whitespace().await;
         decoder.expect_byte(LIST_BEGIN).await?;
 
         Ok(SeqAccess { decoder, size_hint })
@@ -140,7 +140,7 @@ impl<'a, S: Stream<Item = Vec<u8>> + Send + Unpin + 'a> de::SeqAccess for SeqAcc
     type Error = Error;
 
     async fn next_element<T: FromStream>(&mut self) -> Result<Option<T>, Self::Error> {
-        self.decoder.expect_whitespace().await?;
+        self.decoder.expect_whitespace().await;
 
         if self.decoder.maybe_byte(LIST_END).await? {
             return Ok(None);
@@ -195,7 +195,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         Ok(s)
     }
 
-    async fn buffer_while<F: Fn(u8) -> bool>(&mut self, cond: F) -> Result<Vec<u8>, Error> {
+    async fn buffer_while<F: Fn(u8) -> bool>(&mut self, cond: F) -> Vec<u8> {
         let mut i = 0;
         loop {
             while i >= self.buffer.len() && !self.source.is_done() {
@@ -205,13 +205,13 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
             if i < self.buffer.len() && cond(self.buffer[i]) {
                 i += 1;
             } else if self.source.is_done() {
-                return Ok(self.buffer.drain(..).collect());
+                return self.buffer.drain(..).collect();
             } else {
                 break;
             }
         }
 
-        Ok(self.buffer.drain(0..i).collect())
+        self.buffer.drain(0..i).collect()
     }
 
     async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
@@ -255,7 +255,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
     }
 
     async fn expect_comma_or(&mut self, byte: u8) -> Result<(), Error> {
-        self.expect_whitespace().await?;
+        self.expect_whitespace().await;
 
         while self.buffer.is_empty() && !self.source.is_done() {
             self.buffer().await;
@@ -270,9 +270,32 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         }
     }
 
-    async fn expect_whitespace(&mut self) -> Result<(), Error> {
-        self.buffer_while(|b| (b as char).is_whitespace()).await?;
-        Ok(())
+    async fn expect_whitespace(&mut self) {
+        self.buffer_while(|b| (b as char).is_whitespace()).await;
+    }
+
+    async fn ignore_value(&mut self) -> Result<(), Error> {
+        self.expect_whitespace().await;
+
+        while self.buffer.is_empty() && !self.source.is_done() {
+            self.buffer().await;
+        }
+
+        if self.buffer.is_empty() {
+            Ok(())
+        } else {
+            if self.buffer[0] == QUOTE {
+                self.parse_string().await?;
+            } else if self.numeric.contains(&self.buffer[0]) {
+                self.parse_number::<f64>().await?;
+            } else if self.buffer[0] == b'n' {
+                self.parse_unit().await?;
+            } else {
+                self.parse_bool().await?;
+            }
+
+            Ok(())
+        }
     }
 
     async fn maybe_byte(&mut self, byte: u8) -> Result<bool, Error> {
@@ -290,14 +313,44 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         }
     }
 
+    async fn parse_bool(&mut self) -> Result<bool, Error> {
+        self.expect_whitespace().await;
+
+        while self.buffer.len() < 4 && !self.source.is_done() {
+            self.buffer().await;
+        }
+
+        if self.buffer.is_empty() {
+            return Err(Error::unexpected_end());
+        } else if self.buffer.starts_with(TRUE) {
+            self.buffer.drain(0..4);
+            return Ok(true);
+        }
+
+        while self.buffer.len() < 5 && !self.source.is_done() {
+            self.buffer().await;
+        }
+
+        if self.buffer.is_empty() {
+            return Err(Error::unexpected_end());
+        } else if self.buffer.starts_with(FALSE) {
+            self.buffer.drain(0..5);
+            return Ok(false);
+        }
+
+        let i = Ord::min(self.buffer.len(), 5);
+        let unknown = String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
+        Err(de::Error::invalid_value(unknown, &"a boolean"))
+    }
+
     async fn parse_number<N: FromStr>(&mut self) -> Result<N, Error>
     where
         <N as FromStr>::Err: fmt::Display,
     {
-        self.expect_whitespace().await?;
+        self.expect_whitespace().await;
 
         let numeric = self.numeric.clone();
-        let n = self.buffer_while(|b| numeric.contains(&b)).await?;
+        let n = self.buffer_while(|b| numeric.contains(&b)).await;
         let n = String::from_utf8(n).map_err(Error::invalid_utf8)?;
 
         n.parse()
@@ -308,6 +361,23 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> Decoder<S> {
         let s = self.buffer_string().await?;
         String::from_utf8(s).map_err(Error::invalid_utf8)
     }
+
+    async fn parse_unit(&mut self) -> Result<(), Error> {
+        self.expect_whitespace().await;
+
+        while self.buffer.len() < 4 && !self.source.is_done() {
+            self.buffer().await;
+        }
+
+        if self.buffer.starts_with(NULL) {
+            Ok(())
+        } else {
+            let i = Ord::min(self.buffer.len(), 5);
+            let as_str =
+                String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
+            Err(de::Error::invalid_type(as_str, &"null"))
+        }
+    }
 }
 
 #[async_trait]
@@ -315,7 +385,7 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
     type Error = Error;
 
     async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.expect_whitespace().await?;
+        self.expect_whitespace().await;
 
         while self.buffer.is_empty() && !self.source.is_done() {
             self.buffer().await;
@@ -370,33 +440,8 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
     }
 
     async fn decode_bool<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.expect_whitespace().await?;
-
-        while self.buffer.len() < 4 && !self.source.is_done() {
-            self.buffer().await;
-        }
-
-        if self.buffer.is_empty() {
-            return Err(Error::unexpected_end());
-        } else if self.buffer.starts_with(TRUE) {
-            self.buffer.drain(0..4);
-            return visitor.visit_bool(true);
-        }
-
-        while self.buffer.len() < 5 && !self.source.is_done() {
-            self.buffer().await;
-        }
-
-        if self.buffer.is_empty() {
-            return Err(Error::unexpected_end());
-        } else if self.buffer.starts_with(FALSE) {
-            self.buffer.drain(0..5);
-            return visitor.visit_bool(false);
-        }
-
-        let unknown = String::from_utf8(self.buffer[0..5].to_vec()).map_err(Error::invalid_utf8)?;
-
-        Err(de::Error::invalid_value(unknown, &"a boolean"))
+        let b = self.parse_bool().await?;
+        visitor.visit_bool(b)
     }
 
     async fn decode_i8<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -450,18 +495,20 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
     }
 
     async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.expect_whitespace().await?;
+        self.expect_whitespace().await;
 
         let s = self.parse_string().await?;
         visitor.visit_string(s)
     }
 
-    async fn decode_byte_buf<V: Visitor>(&mut self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_byte_buf<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let encoded = self.parse_string().await?;
+        let decoded = base64::decode(encoded).map_err(de::Error::custom)?;
+        visitor.visit_byte_buf(decoded)
     }
 
     async fn decode_option<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.expect_whitespace().await?;
+        self.expect_whitespace().await;
 
         while self.buffer.len() < 4 && !self.source.is_done() {
             self.buffer().await;
@@ -480,12 +527,12 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         visitor.visit_seq(access).await
     }
 
-    async fn decode_unit_struct<V: Visitor>(
+    async fn decode_unit<V: Visitor>(
         &mut self,
-        _name: &'static str,
-        _visitor: V,
+        visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
-        unimplemented!()
+        self.parse_unit().await?;
+        visitor.visit_unit()
     }
 
     async fn decode_tuple<V: Visitor>(
@@ -502,18 +549,16 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         visitor.visit_map(access).await
     }
 
-    async fn decode_identifier<V: Visitor>(
-        &mut self,
-        _visitor: V,
-    ) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_identifier<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        self.decode_string(visitor).await
     }
 
     async fn decode_ignored_any<V: Visitor>(
         &mut self,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+        self.ignore_value().await?;
+        visitor.visit_unit()
     }
 }
 
@@ -580,6 +625,35 @@ mod tests {
             decode::<String>("\t\r\n\" hello world \"").await,
             " hello world ".to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn test_bytes() {
+        struct BytesVisitor;
+        impl Visitor for BytesVisitor {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a byte buffer")
+            }
+
+            fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                Ok(v)
+            }
+        }
+
+        let expected = "मकर संक्रान्ति";
+        let mut decoder = Decoder::from(stream::once(future::ready(
+            format!("\"{}\"", base64::encode(expected.as_bytes()))
+                .as_bytes()
+                .to_vec(),
+        )));
+
+        let actual = de::Decoder::decode_byte_buf(&mut decoder, BytesVisitor)
+            .await
+            .unwrap();
+
+        assert_eq!(expected.as_bytes().to_vec(), actual);
     }
 
     #[tokio::test]
