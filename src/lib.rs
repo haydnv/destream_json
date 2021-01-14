@@ -460,8 +460,19 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         unimplemented!()
     }
 
-    async fn decode_option<V: Visitor>(&mut self, _visitor: V) -> Result<V::Value, Self::Error> {
-        unimplemented!()
+    async fn decode_option<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        self.expect_whitespace().await?;
+
+        while self.buffer.len() < 4 && !self.source.is_done() {
+            self.buffer().await;
+        }
+
+        if self.buffer.starts_with(NULL) {
+            self.buffer.drain(0..4);
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self).await
+        }
     }
 
     async fn decode_seq<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -524,6 +535,7 @@ pub async fn from_stream<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, HashMap};
     use std::iter::FromIterator;
 
     use futures::future;
@@ -589,5 +601,18 @@ mod tests {
             decode::<HashSet<String>>("[\"one\", \"two\", \"three\"]").await,
             HashSet::from_iter(vec!["one", "two", "three"].into_iter().map(String::from))
         )
+    }
+
+    #[tokio::test]
+    async fn test_map() {
+        assert_eq!(
+            decode::<HashMap<String, bool>>("\r\n\t{ \"k1\":\ttrue, \"k2\":false}").await,
+            HashMap::from_iter(vec![("k1".to_string(), true), ("k2".to_string(), false)])
+        );
+
+        assert_eq!(
+            decode::<BTreeMap<i32, Option<bool>>>("\r\n\t{ -1:\ttrue, 2:null}").await,
+            BTreeMap::from_iter(vec![(-1, Some(true)), (2, None),])
+        );
     }
 }
