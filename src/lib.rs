@@ -1,6 +1,7 @@
 //! Library for decoding and encoding JSON streams.
 
 pub mod de;
+pub mod en;
 
 #[cfg(test)]
 mod tests {
