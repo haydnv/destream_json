@@ -4,7 +4,8 @@ use std::fmt;
 use std::pin::Pin;
 
 use destream::en::{self, ToStream};
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::future;
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
 pub type JSONStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>>>>;
 
@@ -110,56 +111,56 @@ impl en::Encoder for Encoder {
     type EncodeStruct = EncodeStruct;
     type EncodeTuple = EncodeTuple;
 
-    fn encode_bool(self, _v: bool) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_i16(self, _v: i16) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_i32(self, _v: i32) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_i64(self, _v: i64) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_u8(self, _v: u8) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_u16(self, _v: u16) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_u32(self, _v: u32) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_u64(self, _v: u64) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
-    fn encode_str(self, _v: &str) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(v))
     }
 
     fn encode_none(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        Ok(encode_fmt("null"))
     }
 
     fn encode_some<T: ToStream + ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error> {
@@ -167,7 +168,7 @@ impl en::Encoder for Encoder {
     }
 
     fn encode_unit(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        Ok(encode_fmt("null"))
     }
 
     fn encode_seq(self, _len: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
@@ -195,4 +196,9 @@ pub fn encode_stream<T: ToStream, S: Stream<Item = T>>(
     source: S,
 ) -> impl Stream<Item = Result<Vec<u8>, Error>> {
     source.map(|item| item.to_stream(Encoder)).try_flatten()
+}
+
+fn encode_fmt<T: fmt::Display>(value: T) -> JSONStream {
+    let encoded = value.to_string().as_bytes().to_vec();
+    Box::pin(stream::once(future::ready(Ok(encoded))))
 }
