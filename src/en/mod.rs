@@ -8,11 +8,11 @@ use std::pin::Pin;
 
 use destream::en::{self, ToStream};
 use futures::future;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt};
 
 use crate::constants::*;
 
-pub type JSONStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>>>>;
+pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + 'en>>;
 
 /// An error encountered while encoding a stream.
 pub struct Error {
@@ -38,12 +38,12 @@ impl fmt::Display for Error {
     }
 }
 
-struct MapEncoder {
-    pending_key: Option<JSONStream>,
-    entries: VecDeque<(JSONStream, JSONStream)>,
+struct MapEncoder<'en> {
+    pending_key: Option<JSONStream<'en>>,
+    entries: VecDeque<(JSONStream<'en>, JSONStream<'en>)>,
 }
 
-impl MapEncoder {
+impl<'en> MapEncoder<'en> {
     fn new(size_hint: Option<usize>) -> Self {
         let entries = if let Some(len) = size_hint {
             VecDeque::with_capacity(len)
@@ -58,11 +58,11 @@ impl MapEncoder {
     }
 }
 
-impl en::EncodeMap for MapEncoder {
-    type Ok = JSONStream;
+impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
+    type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_key<T: ToStream + ?Sized>(&mut self, key: &T) -> Result<(), Self::Error> {
+    fn encode_key<T: ToStream<'en> + 'en>(&mut self, key: &'en T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
             self.pending_key = Some(key.to_stream(Encoder)?);
             Ok(())
@@ -73,7 +73,7 @@ impl en::EncodeMap for MapEncoder {
         }
     }
 
-    fn encode_value<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+    fn encode_value<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
             return Err(en::Error::custom(
                 "You must call encode_key before encode_value",
@@ -118,11 +118,11 @@ impl en::EncodeMap for MapEncoder {
     }
 }
 
-struct SequenceEncoder {
-    items: VecDeque<JSONStream>,
+struct SequenceEncoder<'en> {
+    items: VecDeque<JSONStream<'en>>,
 }
 
-impl SequenceEncoder {
+impl<'en> SequenceEncoder<'en> {
     fn new(size_hint: Option<usize>) -> Self {
         let items = if let Some(len) = size_hint {
             VecDeque::with_capacity(len)
@@ -133,11 +133,11 @@ impl SequenceEncoder {
         Self { items }
     }
 
-    fn push(&mut self, value: JSONStream) {
+    fn push(&mut self, value: JSONStream<'en>) {
         self.items.push_back(value);
     }
 
-    fn encode(mut self) -> Result<JSONStream, Error> {
+    fn encode(mut self) -> Result<JSONStream<'en>, Error> {
         let mut encoded = delimiter(LIST_BEGIN);
 
         while let Some(item) = self.items.pop_front() {
@@ -153,11 +153,11 @@ impl SequenceEncoder {
     }
 }
 
-impl en::EncodeSeq for SequenceEncoder {
-    type Ok = JSONStream;
+impl<'en> en::EncodeSeq<'en> for SequenceEncoder<'en> {
+    type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
         let encoded = value.to_stream(Encoder)?;
         self.push(encoded);
         Ok(())
@@ -168,25 +168,25 @@ impl en::EncodeSeq for SequenceEncoder {
     }
 }
 
-struct StructEncoder {
-    fields: HashMap<&'static str, JSONStream>,
+struct StructEncoder<'en> {
+    fields: HashMap<&'static str, JSONStream<'en>>,
 }
 
-impl StructEncoder {
+impl<'en> StructEncoder<'en> {
     fn new(size: usize) -> Self {
         let fields = HashMap::with_capacity(size);
         Self { fields }
     }
 }
 
-impl en::EncodeStruct for StructEncoder {
-    type Ok = JSONStream;
+impl<'en> en::EncodeStruct<'en> for StructEncoder<'en> {
+    type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_field<T: ToStream + ?Sized>(
+    fn encode_field<T: ToStream<'en> + 'en>(
         &mut self,
         key: &'static str,
-        value: &T,
+        value: &'en T,
     ) -> Result<(), Self::Error> {
         let value = value.to_stream(Encoder)?;
 
@@ -228,11 +228,11 @@ impl en::EncodeStruct for StructEncoder {
     }
 }
 
-impl en::EncodeTuple for SequenceEncoder {
-    type Ok = JSONStream;
+impl<'en> en::EncodeTuple<'en> for SequenceEncoder<'en> {
+    type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
         let encoded = value.to_stream(Encoder)?;
         self.push(encoded);
         Ok(())
@@ -245,13 +245,13 @@ impl en::EncodeTuple for SequenceEncoder {
 
 struct Encoder;
 
-impl en::Encoder for Encoder {
-    type Ok = JSONStream;
+impl<'en> en::Encoder<'en> for Encoder {
+    type Ok = JSONStream<'en>;
     type Error = Error;
-    type EncodeMap = MapEncoder;
-    type EncodeSeq = SequenceEncoder;
-    type EncodeStruct = StructEncoder;
-    type EncodeTuple = SequenceEncoder;
+    type EncodeMap = MapEncoder<'en>;
+    type EncodeSeq = SequenceEncoder<'en>;
+    type EncodeStruct = StructEncoder<'en>;
+    type EncodeTuple = SequenceEncoder<'en>;
 
     fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
@@ -305,7 +305,7 @@ impl en::Encoder for Encoder {
         Ok(encode_fmt("null"))
     }
 
-    fn encode_some<T: ToStream + ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error> {
+    fn encode_some<T: ToStream<'en> + 'en>(self, value: &'en T) -> Result<Self::Ok, Self::Error> {
         value.to_stream(self)
     }
 
@@ -334,18 +334,12 @@ impl en::Encoder for Encoder {
     }
 }
 
-pub fn encode_stream<T: ToStream, S: Stream<Item = T>>(
-    source: S,
-) -> impl Stream<Item = Result<Vec<u8>, Error>> {
-    source.map(|item| item.to_stream(Encoder)).try_flatten()
-}
-
-fn encode_fmt<T: fmt::Display>(value: T) -> JSONStream {
+fn encode_fmt<'en, T: fmt::Display>(value: T) -> JSONStream<'en> {
     let encoded = value.to_string().as_bytes().to_vec();
     Box::pin(futures::stream::once(future::ready(Ok(encoded))))
 }
 
-fn delimiter(byte: u8) -> JSONStream {
+fn delimiter<'en>(byte: u8) -> JSONStream<'en> {
     let encoded = futures::stream::once(future::ready(Ok(vec![byte])));
     Box::pin(encoded)
 }
