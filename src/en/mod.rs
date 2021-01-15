@@ -1,6 +1,7 @@
 //! Serialize a Rust data structure into JSON data.
 
-use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::mem;
 use std::pin::Pin;
@@ -167,22 +168,63 @@ impl en::EncodeSeq for SequenceEncoder {
     }
 }
 
-struct EncodeStruct;
+struct StructEncoder {
+    fields: HashMap<&'static str, JSONStream>,
+}
 
-impl en::EncodeStruct for EncodeStruct {
+impl StructEncoder {
+    fn new(size: usize) -> Self {
+        let fields = HashMap::with_capacity(size);
+        Self { fields }
+    }
+}
+
+impl en::EncodeStruct for StructEncoder {
     type Ok = JSONStream;
     type Error = Error;
 
     fn encode_field<T: ToStream + ?Sized>(
         &mut self,
-        _key: &'static str,
-        _value: &T,
+        key: &'static str,
+        value: &T,
     ) -> Result<(), Self::Error> {
-        unimplemented!()
+        let value = value.to_stream(Encoder)?;
+
+        match self.fields.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(en::Error::custom(format!(
+                "There is already a field {} defined",
+                key
+            ))),
+        }
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        let mut encoded = delimiter(MAP_BEGIN);
+
+        let mut i = 0;
+        let len = self.fields.len();
+        for (k, v) in self.fields.into_iter() {
+            encoded = Box::pin(
+                encoded
+                    .chain(delimiter(LIST_BEGIN))
+                    .chain(encode_fmt(k))
+                    .chain(delimiter(COMMA))
+                    .chain(v)
+                    .chain(delimiter(LIST_END)),
+            );
+
+            i += 1;
+            if i < len {
+                encoded = Box::pin(encoded.chain(delimiter(COMMA)));
+            }
+        }
+
+        encoded = Box::pin(encoded.chain(delimiter(MAP_END)));
+        Ok(encoded)
     }
 }
 
@@ -208,7 +250,7 @@ impl en::Encoder for Encoder {
     type Error = Error;
     type EncodeMap = MapEncoder;
     type EncodeSeq = SequenceEncoder;
-    type EncodeStruct = EncodeStruct;
+    type EncodeStruct = StructEncoder;
     type EncodeTuple = SequenceEncoder;
 
     fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
@@ -286,9 +328,9 @@ impl en::Encoder for Encoder {
     fn encode_struct(
         self,
         _name: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::EncodeStruct, Self::Error> {
-        unimplemented!()
+        Ok(StructEncoder::new(len))
     }
 }
 
