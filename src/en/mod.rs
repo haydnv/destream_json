@@ -55,11 +55,11 @@ impl en::EncodeMap for EncodeMap {
     }
 }
 
-struct EncodeSeq {
+struct SequenceEncoder {
     items: VecDeque<JSONStream>,
 }
 
-impl EncodeSeq {
+impl SequenceEncoder {
     fn new(size_hint: Option<usize>) -> Self {
         let items = if let Some(len) = size_hint {
             VecDeque::with_capacity(len)
@@ -69,18 +69,12 @@ impl EncodeSeq {
 
         Self { items }
     }
-}
 
-impl en::EncodeSeq for EncodeSeq {
-    type Ok = JSONStream;
-    type Error = Error;
-
-    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
-        self.items.push_back(value.to_stream(Encoder)?);
-        Ok(())
+    fn push(&mut self, value: JSONStream) {
+        self.items.push_back(value);
     }
 
-    fn end(mut self) -> Result<Self::Ok, Self::Error> {
+    fn encode(mut self) -> Result<JSONStream, Error> {
         let mut encoded = delimiter(LIST_BEGIN);
 
         while let Some(item) = self.items.pop_front() {
@@ -93,6 +87,21 @@ impl en::EncodeSeq for EncodeSeq {
 
         encoded = Box::pin(encoded.chain(delimiter(LIST_END)));
         Ok(encoded)
+    }
+}
+
+impl en::EncodeSeq for SequenceEncoder {
+    type Ok = JSONStream;
+    type Error = Error;
+
+    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+        let encoded = value.to_stream(Encoder)?;
+        self.push(encoded);
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.encode()
     }
 }
 
@@ -115,18 +124,18 @@ impl en::EncodeStruct for EncodeStruct {
     }
 }
 
-struct EncodeTuple;
-
-impl en::EncodeTuple for EncodeTuple {
+impl en::EncodeTuple for SequenceEncoder {
     type Ok = JSONStream;
     type Error = Error;
 
-    fn encode_element<T: ToStream + ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error> {
-        unimplemented!()
+    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+        let encoded = value.to_stream(Encoder)?;
+        self.push(encoded);
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        self.encode()
     }
 }
 
@@ -136,9 +145,9 @@ impl en::Encoder for Encoder {
     type Ok = JSONStream;
     type Error = Error;
     type EncodeMap = EncodeMap;
-    type EncodeSeq = EncodeSeq;
+    type EncodeSeq = SequenceEncoder;
     type EncodeStruct = EncodeStruct;
-    type EncodeTuple = EncodeTuple;
+    type EncodeTuple = SequenceEncoder;
 
     fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
@@ -192,8 +201,8 @@ impl en::Encoder for Encoder {
         Ok(encode_fmt("null"))
     }
 
-    fn encode_some<T: ToStream + ?Sized>(self, _value: &T) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn encode_some<T: ToStream + ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error> {
+        value.to_stream(self)
     }
 
     fn encode_unit(self) -> Result<Self::Ok, Self::Error> {
@@ -201,11 +210,11 @@ impl en::Encoder for Encoder {
     }
 
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
-        Ok(EncodeSeq::new(size_hint))
+        Ok(SequenceEncoder::new(size_hint))
     }
 
-    fn encode_tuple(self, _len: usize) -> Result<Self::EncodeTuple, Self::Error> {
-        unimplemented!()
+    fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {
+        Ok(SequenceEncoder::new(Some(len)))
     }
 
     fn encode_map(self, _len: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
