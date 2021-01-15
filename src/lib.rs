@@ -1,5 +1,6 @@
 //! Library for decoding and encoding JSON streams.
 
+mod constants;
 pub mod de;
 pub mod en;
 

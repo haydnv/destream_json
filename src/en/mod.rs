@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use destream::en::{self, ToStream};
 use futures::future;
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 
 pub type JSONStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>>>>;
 
@@ -200,5 +200,5 @@ pub fn encode_stream<T: ToStream, S: Stream<Item = T>>(
 
 fn encode_fmt<T: fmt::Display>(value: T) -> JSONStream {
     let encoded = value.to_string().as_bytes().to_vec();
-    Box::pin(stream::once(future::ready(Ok(encoded))))
+    Box::pin(futures::stream::once(future::ready(Ok(encoded))))
 }

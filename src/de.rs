@@ -8,21 +8,7 @@ use async_trait::async_trait;
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, Stream, StreamExt};
 
-const COLON: u8 = b':';
-const COMMA: u8 = b',';
-const DECIMAL: u8 = b'.';
-const ESCAPE: u8 = b'\\';
-const FALSE: &[u8] = b"false";
-const TRUE: &[u8] = b"true";
-const LIST_BEGIN: u8 = b'[';
-const LIST_END: u8 = b']';
-const NULL: &[u8] = b"null";
-const MAP_BEGIN: u8 = b'{';
-const MAP_END: u8 = b'}';
-const NUMERIC: [u8; 15] = [
-    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'e', b'E', DECIMAL,
-];
-const QUOTE: u8 = b'"';
+use crate::constants::*;
 
 /// An error encountered while decoding a JSON stream.
 pub struct Error {
