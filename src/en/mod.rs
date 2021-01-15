@@ -1,11 +1,14 @@
 //! Serialize a Rust data structure into JSON data.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::pin::Pin;
 
 use destream::en::{self, ToStream};
 use futures::future;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
+
+use crate::constants::*;
 
 pub type JSONStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>>>>;
 
@@ -52,18 +55,44 @@ impl en::EncodeMap for EncodeMap {
     }
 }
 
-struct EncodeSeq;
+struct EncodeSeq {
+    items: VecDeque<JSONStream>,
+}
+
+impl EncodeSeq {
+    fn new(size_hint: Option<usize>) -> Self {
+        let items = if let Some(len) = size_hint {
+            VecDeque::with_capacity(len)
+        } else {
+            VecDeque::new()
+        };
+
+        Self { items }
+    }
+}
 
 impl en::EncodeSeq for EncodeSeq {
     type Ok = JSONStream;
     type Error = Error;
 
-    fn encode_element<T: ToStream + ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error> {
-        unimplemented!()
+    fn encode_element<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+        self.items.push_back(value.to_stream(Encoder)?);
+        Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn end(mut self) -> Result<Self::Ok, Self::Error> {
+        let mut encoded = delimiter(LIST_BEGIN);
+
+        while let Some(item) = self.items.pop_front() {
+            encoded = Box::pin(encoded.chain(item));
+
+            if !self.items.is_empty() {
+                encoded = Box::pin(encoded.chain(delimiter(COMMA)));
+            }
+        }
+
+        encoded = Box::pin(encoded.chain(delimiter(LIST_END)));
+        Ok(encoded)
     }
 }
 
@@ -171,8 +200,8 @@ impl en::Encoder for Encoder {
         Ok(encode_fmt("null"))
     }
 
-    fn encode_seq(self, _len: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
-        unimplemented!()
+    fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
+        Ok(EncodeSeq::new(size_hint))
     }
 
     fn encode_tuple(self, _len: usize) -> Result<Self::EncodeTuple, Self::Error> {
@@ -201,4 +230,9 @@ pub fn encode_stream<T: ToStream, S: Stream<Item = T>>(
 fn encode_fmt<T: fmt::Display>(value: T) -> JSONStream {
     let encoded = value.to_string().as_bytes().to_vec();
     Box::pin(futures::stream::once(future::ready(Ok(encoded))))
+}
+
+fn delimiter(byte: u8) -> JSONStream {
+    let encoded = futures::stream::once(future::ready(Ok(vec![byte])));
+    Box::pin(encoded)
 }
