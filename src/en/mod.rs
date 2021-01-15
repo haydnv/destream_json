@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::mem;
 use std::pin::Pin;
 
 use destream::en::{self, ToStream};
@@ -36,22 +37,83 @@ impl fmt::Display for Error {
     }
 }
 
-struct EncodeMap;
+struct MapEncoder {
+    pending_key: Option<JSONStream>,
+    entries: VecDeque<(JSONStream, JSONStream)>,
+}
 
-impl en::EncodeMap for EncodeMap {
+impl MapEncoder {
+    fn new(size_hint: Option<usize>) -> Self {
+        let entries = if let Some(len) = size_hint {
+            VecDeque::with_capacity(len)
+        } else {
+            VecDeque::new()
+        };
+
+        Self {
+            pending_key: None,
+            entries,
+        }
+    }
+}
+
+impl en::EncodeMap for MapEncoder {
     type Ok = JSONStream;
     type Error = Error;
 
-    fn encode_key<T: ToStream + ?Sized>(&mut self, _key: &T) -> Result<(), Self::Error> {
-        unimplemented!()
+    fn encode_key<T: ToStream + ?Sized>(&mut self, key: &T) -> Result<(), Self::Error> {
+        if self.pending_key.is_none() {
+            self.pending_key = Some(key.to_stream(Encoder)?);
+            Ok(())
+        } else {
+            Err(en::Error::custom(
+                "You must call encode_value before calling encode_key again",
+            ))
+        }
     }
 
-    fn encode_value<T: ToStream + ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error> {
-        unimplemented!()
+    fn encode_value<T: ToStream + ?Sized>(&mut self, value: &T) -> Result<(), Self::Error> {
+        if self.pending_key.is_none() {
+            return Err(en::Error::custom(
+                "You must call encode_key before encode_value",
+            ));
+        }
+
+        let value = value.to_stream(Encoder)?;
+
+        let mut key = None;
+        mem::swap(&mut self.pending_key, &mut key);
+
+        self.entries.push_back((key.unwrap(), value));
+        Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+    fn end(mut self) -> Result<Self::Ok, Self::Error> {
+        if self.pending_key.is_some() {
+            return Err(en::Error::custom(
+                "You must call encode_value after calling encode_key",
+            ));
+        }
+
+        let mut encoded = delimiter(MAP_BEGIN);
+
+        while let Some((key, value)) = self.entries.pop_front() {
+            encoded = Box::pin(
+                encoded
+                    .chain(delimiter(LIST_BEGIN))
+                    .chain(key)
+                    .chain(delimiter(COMMA))
+                    .chain(value)
+                    .chain(delimiter(LIST_END)),
+            );
+
+            if !self.entries.is_empty() {
+                encoded = Box::pin(encoded.chain(delimiter(COMMA)));
+            }
+        }
+
+        encoded = Box::pin(encoded.chain(delimiter(MAP_END)));
+        Ok(encoded)
     }
 }
 
@@ -144,7 +206,7 @@ struct Encoder;
 impl en::Encoder for Encoder {
     type Ok = JSONStream;
     type Error = Error;
-    type EncodeMap = EncodeMap;
+    type EncodeMap = MapEncoder;
     type EncodeSeq = SequenceEncoder;
     type EncodeStruct = EncodeStruct;
     type EncodeTuple = SequenceEncoder;
@@ -217,8 +279,8 @@ impl en::Encoder for Encoder {
         Ok(SequenceEncoder::new(Some(len)))
     }
 
-    fn encode_map(self, _len: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
-        unimplemented!()
+    fn encode_map(self, size_hint: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
+        Ok(MapEncoder::new(size_hint))
     }
 
     fn encode_struct(
