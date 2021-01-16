@@ -12,6 +12,8 @@ use futures::stream::{Stream, StreamExt};
 
 use crate::constants::*;
 
+mod stream;
+
 pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + 'en>>;
 
 /// An error encountered while encoding a stream.
@@ -62,9 +64,9 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_key<T: ToStream<'en> + 'en>(&mut self, key: &'en T) -> Result<(), Self::Error> {
+    fn encode_key<T: ToStream<'en> + 'en>(&mut self, key: T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
-            self.pending_key = Some(key.to_stream(Encoder)?);
+            self.pending_key = Some(key.into_stream(Encoder)?);
             Ok(())
         } else {
             Err(en::Error::custom(
@@ -73,14 +75,14 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
         }
     }
 
-    fn encode_value<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
+    fn encode_value<T: ToStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
             return Err(en::Error::custom(
                 "You must call encode_key before encode_value",
             ));
         }
 
-        let value = value.to_stream(Encoder)?;
+        let value = value.into_stream(Encoder)?;
 
         let mut key = None;
         mem::swap(&mut self.pending_key, &mut key);
@@ -99,14 +101,7 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
         let mut encoded = delimiter(MAP_BEGIN);
 
         while let Some((key, value)) = self.entries.pop_front() {
-            encoded = Box::pin(
-                encoded
-                    .chain(delimiter(LIST_BEGIN))
-                    .chain(key)
-                    .chain(delimiter(COMMA))
-                    .chain(value)
-                    .chain(delimiter(LIST_END)),
-            );
+            encoded = Box::pin(encoded.chain(key).chain(delimiter(COLON)).chain(value));
 
             if !self.entries.is_empty() {
                 encoded = Box::pin(encoded.chain(delimiter(COMMA)));
@@ -157,8 +152,8 @@ impl<'en> en::EncodeSeq<'en> for SequenceEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
-        let encoded = value.to_stream(Encoder)?;
+    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
+        let encoded = value.into_stream(Encoder)?;
         self.push(encoded);
         Ok(())
     }
@@ -186,9 +181,9 @@ impl<'en> en::EncodeStruct<'en> for StructEncoder<'en> {
     fn encode_field<T: ToStream<'en> + 'en>(
         &mut self,
         key: &'static str,
-        value: &'en T,
+        value: T,
     ) -> Result<(), Self::Error> {
-        let value = value.to_stream(Encoder)?;
+        let value = value.into_stream(Encoder)?;
 
         match self.fields.entry(key) {
             Entry::Vacant(entry) => {
@@ -232,8 +227,8 @@ impl<'en> en::EncodeTuple<'en> for SequenceEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
-    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: &'en T) -> Result<(), Self::Error> {
-        let encoded = value.to_stream(Encoder)?;
+    fn encode_element<T: ToStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
+        let encoded = value.into_stream(Encoder)?;
         self.push(encoded);
         Ok(())
     }
@@ -298,31 +293,38 @@ impl<'en> en::Encoder<'en> for Encoder {
     }
 
     fn encode_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(encode_fmt(v))
+        Ok(encode_fmt(format!("\"{}\"", v)))
     }
 
     fn encode_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt("null"))
     }
 
-    fn encode_some<T: ToStream<'en> + 'en>(self, value: &'en T) -> Result<Self::Ok, Self::Error> {
-        value.to_stream(self)
+    fn encode_some<T: ToStream<'en> + 'en>(self, value: T) -> Result<Self::Ok, Self::Error> {
+        value.into_stream(self)
     }
 
     fn encode_unit(self) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt("null"))
     }
 
+    fn encode_map(self, size_hint: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
+        Ok(MapEncoder::new(size_hint))
+    }
+
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
         Ok(SequenceEncoder::new(size_hint))
     }
 
-    fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {
-        Ok(SequenceEncoder::new(Some(len)))
-    }
-
-    fn encode_map(self, size_hint: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
-        Ok(MapEncoder::new(size_hint))
+    fn encode_seq_try_stream<
+        E: fmt::Display + 'en,
+        T: ToStream<'en> + 'en,
+        S: Stream<Item = Result<T, E>> + 'en,
+    >(
+        self,
+        seq: S,
+    ) -> Result<Self::Ok, Self::Error> {
+        Ok(Box::pin(stream::JSONListStream::from(seq)))
     }
 
     fn encode_struct(
@@ -331,6 +333,10 @@ impl<'en> en::Encoder<'en> for Encoder {
         len: usize,
     ) -> Result<Self::EncodeStruct, Self::Error> {
         Ok(StructEncoder::new(len))
+    }
+
+    fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {
+        Ok(SequenceEncoder::new(Some(len)))
     }
 }
 
@@ -342,4 +348,8 @@ fn encode_fmt<'en, T: fmt::Display>(value: T) -> JSONStream<'en> {
 fn delimiter<'en>(byte: u8) -> JSONStream<'en> {
     let encoded = futures::stream::once(future::ready(Ok(vec![byte])));
     Box::pin(encoded)
+}
+
+pub fn encode<'en, T: ToStream<'en> + 'en>(value: T) -> Result<JSONStream<'en>, Error> {
+    value.into_stream(Encoder)
 }

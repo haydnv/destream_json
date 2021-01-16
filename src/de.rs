@@ -564,7 +564,7 @@ impl<S: Stream> From<S> for Decoder<S> {
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T`.
-pub async fn from_stream<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
+pub async fn decode<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
     source: S,
 ) -> Result<T, Error> {
     T::from_stream(&mut Decoder::from(source)).await

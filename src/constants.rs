@@ -5,6 +5,7 @@ pub const ESCAPE: u8 = b'\\';
 pub const FALSE: &[u8] = b"false";
 pub const TRUE: &[u8] = b"true";
 pub const LIST_BEGIN: u8 = b'[';
+pub const LIST_EMPTY: &[u8] = b"[]";
 pub const LIST_END: u8 = b']';
 pub const NULL: &[u8] = b"null";
 pub const MAP_BEGIN: u8 = b'{';
