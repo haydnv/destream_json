@@ -540,10 +540,6 @@ impl<S: Stream<Item = Vec<u8>> + Send + Unpin> de::Decoder for Decoder<S> {
         visitor.visit_map(access).await
     }
 
-    async fn decode_identifier<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.decode_string(visitor).await
-    }
-
     async fn decode_ignored_any<V: Visitor>(
         &mut self,
         visitor: V,
