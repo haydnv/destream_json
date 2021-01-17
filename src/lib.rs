@@ -48,11 +48,13 @@ mod tests {
         test_encode(encode(value).unwrap(), expected).await;
     }
 
-    async fn test_encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + 'en>(
+    async fn test_encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Unpin + 'en>(
         seq: S,
         expected: &str,
     ) {
-        test_encode(encode_list(seq).unwrap(), expected).await;
+        let seq: Box<dyn Stream<Item = SeqEntry<'en, T>> + Unpin + 'en> =
+            Box::new(seq.map(SeqEntry::from));
+        test_encode(encode(seq).unwrap(), expected).await;
     }
 
     #[tokio::test]

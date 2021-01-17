@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 
@@ -111,6 +112,28 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
         Ok(encoded)
     }
 }
+
+pub struct SeqEntry<'en, T: 'en> {
+    element: Box<T>,
+    phantom: PhantomData<&'en T>,
+}
+
+impl<'en, T: 'en> From<T> for SeqEntry<'en, T> {
+    fn from(element: T) -> Self {
+        Self {
+            element: Box::new(element),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'en, T: IntoStream<'en> + 'en> en::IntoStream<'en> for SeqEntry<'en, T> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.element.into_stream(encoder)
+    }
+}
+
+impl<'en, T: IntoStream<'en> + 'en> en::SeqEntry<'en> for SeqEntry<'en, T> {}
 
 struct SequenceEncoder<'en> {
     items: VecDeque<JSONStream<'en>>,
@@ -282,21 +305,4 @@ fn delimiter<'en>(byte: u8) -> JSONStream<'en> {
 
 pub fn encode<'en, T: IntoStream<'en> + 'en>(value: T) -> Result<JSONStream<'en>, Error> {
     value.into_stream(Encoder)
-}
-
-pub fn encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + 'en>(
-    seq: S,
-) -> Result<JSONStream<'en>, Error> {
-    en::Encoder::encode_seq_stream(Encoder, seq)
-}
-
-pub fn try_encode_list<
-    'en,
-    T: IntoStream<'en> + 'en,
-    E: fmt::Display + 'en,
-    S: Stream<Item = Result<T, E>> + 'en,
->(
-    seq: S,
-) -> Result<JSONStream<'en>, Error> {
-    en::Encoder::encode_seq_try_stream(Encoder, seq)
 }
