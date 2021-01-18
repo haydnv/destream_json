@@ -2,7 +2,6 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 
@@ -112,28 +111,6 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
         Ok(encoded)
     }
 }
-
-pub struct SeqEntry<'en, T: 'en> {
-    element: Box<T>,
-    phantom: PhantomData<&'en T>,
-}
-
-impl<'en, T: 'en> From<T> for SeqEntry<'en, T> {
-    fn from(element: T) -> Self {
-        Self {
-            element: Box::new(element),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<'en, T: IntoStream<'en> + 'en> en::IntoStream<'en> for SeqEntry<'en, T> {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        self.element.into_stream(encoder)
-    }
-}
-
-impl<'en, T: IntoStream<'en> + 'en> en::SeqEntry<'en> for SeqEntry<'en, T> {}
 
 struct SequenceEncoder<'en> {
     items: VecDeque<JSONStream<'en>>,
@@ -273,14 +250,24 @@ impl<'en> en::Encoder<'en> for Encoder {
         Ok(MapEncoder::new(size_hint))
     }
 
+    fn encode_map_stream<
+        K: IntoStream<'en> + 'en,
+        V: IntoStream<'en> + 'en,
+        S: Stream<Item = Result<(K, V), Self::Error>> + 'en,
+    >(
+        self,
+        _map: S,
+    ) -> Result<Self::Ok, Self::Error> {
+        unimplemented!()
+    }
+
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
         Ok(SequenceEncoder::new(size_hint))
     }
 
-    fn encode_seq_try_stream<
-        E: fmt::Display + 'en,
+    fn encode_seq_stream<
         T: IntoStream<'en> + 'en,
-        S: Stream<Item = Result<T, E>> + 'en,
+        S: Stream<Item = Result<T, Self::Error>> + 'en,
     >(
         self,
         seq: S,

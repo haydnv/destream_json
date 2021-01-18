@@ -20,6 +20,7 @@ mod tests {
 
     use super::de::*;
     use super::en::*;
+    use destream::SeqStream;
 
     async fn test_decode<T: FromStream + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
         for i in 1..encoded.len() {
@@ -52,8 +53,7 @@ mod tests {
         seq: S,
         expected: &str,
     ) {
-        let seq: Box<dyn Stream<Item = SeqEntry<'en, T>> + Unpin + 'en> =
-            Box::new(seq.map(SeqEntry::from));
+        let seq = SeqStream::from(seq.map(Result::<T, crate::en::Error>::Ok));
         test_encode(encode(seq).unwrap(), expected).await;
     }
 
