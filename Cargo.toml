@@ -15,7 +15,7 @@ keywords = ["json", "stream", "streaming", "serialize", "deserialize"]
 [dependencies]
 async-trait = "0.1"
 base64 = "0.13"
-destream = {path = "../destream"}
+destream = "0.1"
 futures = "0.3"
 pin-project = "1.0"
 
