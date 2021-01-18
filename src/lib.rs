@@ -1,11 +1,20 @@
 //! Library for decoding and encoding JSON streams.
+//!
+//! Example:
+//! ```
+//! # use futures::executor::block_on;
+//! let expected = ("one".to_string(), 2.0, vec![3, 4]);
+//! let stream = destream_json::encode(&expected).unwrap();
+//! let actual = block_on(destream_json::try_decode(stream)).unwrap();
+//! assert_eq!(expected, actual);
+//! ```
 
 mod constants;
 pub mod de;
 pub mod en;
 
-pub use de::decode;
-pub use en::encode;
+pub use de::{decode, try_decode};
+pub use en::{encode, encode_map, encode_seq};
 
 #[cfg(test)]
 mod tests {
@@ -51,7 +60,7 @@ mod tests {
         test_encode(encode(value).unwrap(), expected).await;
     }
 
-    async fn test_encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Unpin + 'en>(
+    async fn test_encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Send + Unpin + 'en>(
         seq: S,
         expected: &str,
     ) {
@@ -62,7 +71,7 @@ mod tests {
         'en,
         K: IntoStream<'en> + 'en,
         V: IntoStream<'en> + 'en,
-        S: Stream<Item = (K, V)> + Unpin + 'en,
+        S: Stream<Item = (K, V)> + Send + Unpin + 'en,
     >(
         map: S,
         expected: &str,
@@ -131,11 +140,12 @@ mod tests {
         }
 
         let expected = "मकर संक्रान्ति";
-        let mut decoder = Decoder::from(stream::once(future::ready(
-            format!("\"{}\"", base64::encode(expected.as_bytes()))
-                .as_bytes()
-                .to_vec(),
-        )));
+        let mut decoder = Decoder::from(stream::once(future::ready(Ok(format!(
+            "\"{}\"",
+            base64::encode(expected.as_bytes())
+        )
+        .as_bytes()
+        .to_vec()))));
 
         let actual = de::Decoder::decode_byte_buf(&mut decoder, BytesVisitor)
             .await

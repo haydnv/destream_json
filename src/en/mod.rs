@@ -13,7 +13,7 @@ use crate::constants::*;
 
 mod stream;
 
-pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + 'en>>;
+pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en>>;
 
 /// An error encountered while encoding a stream.
 pub struct Error {
@@ -277,7 +277,7 @@ impl<'en> en::Encoder<'en> for Encoder {
     fn encode_map_stream<
         K: IntoStream<'en> + 'en,
         V: IntoStream<'en> + 'en,
-        S: Stream<Item = Result<(K, V), Self::Error>> + 'en,
+        S: Stream<Item = Result<(K, V), Self::Error>> + Send + Unpin + 'en,
     >(
         self,
         map: S,
@@ -293,7 +293,7 @@ impl<'en> en::Encoder<'en> for Encoder {
     #[inline]
     fn encode_seq_stream<
         T: IntoStream<'en> + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + 'en,
+        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
     >(
         self,
         seq: S,
@@ -322,27 +322,8 @@ fn delimiter<'en>(byte: u8) -> JSONStream<'en> {
 /// Given an encodable value, return an encoded stream.
 pub fn encode<'en, T: IntoStream<'en> + 'en>(
     value: T,
-) -> Result<impl Stream<Item = Result<Vec<u8>, Error>> + 'en, Error> {
+) -> Result<impl Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en, Error> {
     value.into_stream(Encoder)
-}
-
-/// Given a stream of encodable elements, return a streaming JSON list.
-pub fn encode_seq<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + 'en>(
-    seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
-    stream::encode_list(seq.map(Result::<T, Error>::Ok))
-}
-
-/// Given a stream of encodable elements, return a streaming JSON list.
-pub fn try_encode_seq<
-    'en,
-    E: fmt::Display + 'en,
-    T: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<T, E>> + 'en,
->(
-    seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
-    stream::encode_list(seq.map_err(en::Error::custom))
 }
 
 /// Given a stream of encodable key-value pairs, return a streaming JSON object.
@@ -350,10 +331,10 @@ pub fn encode_map<
     'en,
     K: IntoStream<'en> + 'en,
     V: IntoStream<'en> + 'en,
-    S: Stream<Item = (K, V)> + 'en,
+    S: Stream<Item = (K, V)> + Send + Unpin + 'en,
 >(
     seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en {
     stream::encode_map(seq.map(Result::<(K, V), Error>::Ok))
 }
 
@@ -363,9 +344,28 @@ pub fn try_encode_map<
     E: fmt::Display + 'en,
     K: IntoStream<'en> + 'en,
     V: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<(K, V), E>> + 'en,
+    S: Stream<Item = Result<(K, V), E>> + Send + Unpin + 'en,
 >(
     seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en {
     Box::pin(stream::encode_map(seq.map_err(en::Error::custom)))
+}
+
+/// Given a stream of encodable elements, return a streaming JSON list.
+pub fn encode_seq<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Send + Unpin + 'en>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en {
+    stream::encode_list(seq.map(Result::<T, Error>::Ok))
+}
+
+/// Given a stream of encodable elements, return a streaming JSON list.
+pub fn try_encode_seq<
+    'en,
+    E: fmt::Display + 'en,
+    T: IntoStream<'en> + 'en,
+    S: Stream<Item = Result<T, E>> + Send + Unpin + 'en,
+>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'en {
+    stream::encode_list(seq.map_err(en::Error::custom))
 }

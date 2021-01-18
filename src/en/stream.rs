@@ -132,7 +132,11 @@ impl<
     }
 }
 
-pub fn encode_list<'en, I: IntoStream<'en>, S: Stream<Item = Result<I, super::Error>> + 'en>(
+pub fn encode_list<
+    'en,
+    I: IntoStream<'en>,
+    S: Stream<Item = Result<I, super::Error>> + Send + Unpin + 'en,
+>(
     seq: S,
 ) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + 'en {
     let source = seq
@@ -153,10 +157,10 @@ pub fn encode_map<
     'en,
     K: IntoStream<'en>,
     V: IntoStream<'en>,
-    S: Stream<Item = Result<(K, V), super::Error>> + 'en,
+    S: Stream<Item = Result<(K, V), super::Error>> + Send + Unpin + 'en,
 >(
     seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + 'en {
+) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + Send + Unpin + 'en {
     let source = seq
         .map(|result| result.and_then(|(key, value)| JSONMapEntryStream::new(key, value)))
         .map_err(en::Error::custom);
