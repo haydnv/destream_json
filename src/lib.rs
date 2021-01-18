@@ -14,7 +14,7 @@ mod tests {
     use std::iter::FromIterator;
 
     use destream::de::{self, FromStream, Visitor};
-    use destream::en::{IntoStream, MapStream, SeqStream};
+    use destream::en::IntoStream;
     use futures::future;
     use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
@@ -29,7 +29,7 @@ mod tests {
         }
     }
 
-    async fn test_encode<'en>(encoded_stream: JSONStream<'en>, expected: &str) {
+    async fn test_encode<'en, S: Stream<Item = Result<Vec<u8>, super::en::Error>> + 'en>(encoded_stream: S, expected: &str) {
         let encoded = encoded_stream
             .try_fold(vec![], |mut buffer, chunk| {
                 buffer.extend(chunk);
@@ -52,21 +52,14 @@ mod tests {
         seq: S,
         expected: &str,
     ) {
-        let seq = SeqStream::from(seq.map(Result::<T, crate::en::Error>::Ok));
-        test_encode(encode(seq).unwrap(), expected).await;
+        test_encode(encode_seq(seq), expected).await;
     }
 
-    async fn test_encode_map<
-        'en,
-        K: IntoStream<'en> + 'en,
-        V: IntoStream<'en> + 'en,
-        S: Stream<Item = (K, V)> + Unpin + 'en,
-    >(
+    async fn test_encode_map<'en, K: IntoStream<'en> + 'en, V: IntoStream<'en> + 'en, S: Stream<Item = (K, V)> + Unpin + 'en>(
         map: S,
         expected: &str,
     ) {
-        let s = MapStream::from(map.map(Result::<(K, V), crate::en::Error>::Ok));
-        test_encode(encode(s).unwrap(), expected).await;
+        test_encode(encode_map(map), expected).await;
     }
 
     #[tokio::test]
@@ -197,13 +190,13 @@ mod tests {
         test_encode_value(map.clone(), "{\"k1\":true}").await;
         test_encode_map(stream::iter(map), "{\"k1\":true}").await;
 
-        let map = BTreeMap::<String, Option<bool>>::from_iter(vec![
-            ("-1".to_string(), Some(true)),
-            ("2".to_string(), None),
+        let map = BTreeMap::<i8, Option<bool>>::from_iter(vec![
+            (-1, Some(true)),
+            (2, None),
         ]);
 
-        test_decode("\r\n\t{ \"-1\":\ttrue, \"2\":null}", map.clone()).await;
-        test_encode_value(map.clone(), "{\"-1\":true,\"2\":null}").await;
-        test_encode_map(stream::iter(map), "{\"-1\":true,\"2\":null}").await;
+        test_decode("\r\n\t{ -1:\ttrue, 2:null}", map.clone()).await;
+        test_encode_value(map.clone(), "{-1:true,2:null}").await;
+        test_encode_map(stream::iter(map), "{-1:true,2:null}").await;
     }
 }
