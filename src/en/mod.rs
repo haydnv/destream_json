@@ -45,6 +45,7 @@ struct MapEncoder<'en> {
 }
 
 impl<'en> MapEncoder<'en> {
+    #[inline]
     fn new(size_hint: Option<usize>) -> Self {
         let entries = if let Some(len) = size_hint {
             VecDeque::with_capacity(len)
@@ -63,6 +64,7 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
+    #[inline]
     fn encode_key<T: IntoStream<'en> + 'en>(&mut self, key: T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
             self.pending_key = Some(key.into_stream(Encoder)?);
@@ -74,6 +76,7 @@ impl<'en> en::EncodeMap<'en> for MapEncoder<'en> {
         }
     }
 
+    #[inline]
     fn encode_value<T: IntoStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
         if self.pending_key.is_none() {
             return Err(en::Error::custom(
@@ -117,6 +120,7 @@ struct SequenceEncoder<'en> {
 }
 
 impl<'en> SequenceEncoder<'en> {
+    #[inline]
     fn new(size_hint: Option<usize>) -> Self {
         let items = if let Some(len) = size_hint {
             VecDeque::with_capacity(len)
@@ -127,6 +131,7 @@ impl<'en> SequenceEncoder<'en> {
         Self { items }
     }
 
+    #[inline]
     fn push(&mut self, value: JSONStream<'en>) {
         self.items.push_back(value);
     }
@@ -151,6 +156,7 @@ impl<'en> en::EncodeSeq<'en> for SequenceEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
+    #[inline]
     fn encode_element<T: IntoStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
         let encoded = value.into_stream(Encoder)?;
         self.push(encoded);
@@ -166,6 +172,7 @@ impl<'en> en::EncodeTuple<'en> for SequenceEncoder<'en> {
     type Ok = JSONStream<'en>;
     type Error = Error;
 
+    #[inline]
     fn encode_element<T: IntoStream<'en> + 'en>(&mut self, value: T) -> Result<(), Self::Error> {
         let encoded = value.into_stream(Encoder)?;
         self.push(encoded);
@@ -186,70 +193,87 @@ impl<'en> en::Encoder<'en> for Encoder {
     type EncodeSeq = SequenceEncoder<'en>;
     type EncodeTuple = SequenceEncoder<'en>;
 
+    #[inline]
     fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
     }
 
+    #[inline]
     fn encode_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(format!("\"{}\"", v)))
     }
 
+    #[inline]
     fn encode_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt("null"))
     }
 
+    #[inline]
     fn encode_some<T: IntoStream<'en> + 'en>(self, value: T) -> Result<Self::Ok, Self::Error> {
         value.into_stream(self)
     }
 
+    #[inline]
     fn encode_unit(self) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt("null"))
     }
 
+    #[inline]
     fn encode_map(self, size_hint: Option<usize>) -> Result<Self::EncodeMap, Self::Error> {
         Ok(MapEncoder::new(size_hint))
     }
 
+    #[inline]
     fn encode_map_stream<
         K: IntoStream<'en> + 'en,
         V: IntoStream<'en> + 'en,
@@ -261,10 +285,12 @@ impl<'en> en::Encoder<'en> for Encoder {
         Ok(Box::pin(stream::encode_map(map)))
     }
 
+    #[inline]
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
         Ok(SequenceEncoder::new(size_hint))
     }
 
+    #[inline]
     fn encode_seq_stream<
         T: IntoStream<'en> + 'en,
         S: Stream<Item = Result<T, Self::Error>> + 'en,
@@ -275,42 +301,71 @@ impl<'en> en::Encoder<'en> for Encoder {
         Ok(Box::pin(stream::encode_list(seq)))
     }
 
+    #[inline]
     fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {
         Ok(SequenceEncoder::new(Some(len)))
     }
 }
 
+#[inline]
 fn encode_fmt<'en, T: fmt::Display>(value: T) -> JSONStream<'en> {
     let encoded = value.to_string().as_bytes().to_vec();
     Box::pin(futures::stream::once(future::ready(Ok(encoded))))
 }
 
+#[inline]
 fn delimiter<'en>(byte: u8) -> JSONStream<'en> {
     let encoded = futures::stream::once(future::ready(Ok(vec![byte])));
     Box::pin(encoded)
 }
 
 /// Given an encodable value, return an encoded stream.
-pub fn encode<'en, T: IntoStream<'en> + 'en>(value: T) -> Result<impl Stream<Item = Result<Vec<u8>, Error>> + 'en, Error> {
+pub fn encode<'en, T: IntoStream<'en> + 'en>(
+    value: T,
+) -> Result<impl Stream<Item = Result<Vec<u8>, Error>> + 'en, Error> {
     value.into_stream(Encoder)
 }
 
 /// Given a stream of encodable elements, return a streaming JSON list.
-pub fn encode_seq<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + 'en>(seq: S) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+pub fn encode_seq<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + 'en>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
     stream::encode_list(seq.map(Result::<T, Error>::Ok))
 }
 
 /// Given a stream of encodable elements, return a streaming JSON list.
-pub fn try_encode_seq<'en, E: fmt::Display + 'en, T: IntoStream<'en> + 'en, S: Stream<Item = Result<T, E>> + 'en>(seq: S) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+pub fn try_encode_seq<
+    'en,
+    E: fmt::Display + 'en,
+    T: IntoStream<'en> + 'en,
+    S: Stream<Item = Result<T, E>> + 'en,
+>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
     stream::encode_list(seq.map_err(en::Error::custom))
 }
 
 /// Given a stream of encodable key-value pairs, return a streaming JSON object.
-pub fn encode_map<'en, K: IntoStream<'en> + 'en, V: IntoStream<'en> + 'en, S: Stream<Item = (K, V)> + 'en>(seq: S) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+pub fn encode_map<
+    'en,
+    K: IntoStream<'en> + 'en,
+    V: IntoStream<'en> + 'en,
+    S: Stream<Item = (K, V)> + 'en,
+>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
     stream::encode_map(seq.map(Result::<(K, V), Error>::Ok))
 }
 
 /// Given a stream of encodable key-value pairs, return a streaming JSON list.
-pub fn try_encode_map<'en, E: fmt::Display + 'en, K: IntoStream<'en> + 'en, V: IntoStream<'en> + 'en, S: Stream<Item = Result<(K, V), E>> + 'en>(seq: S) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
+pub fn try_encode_map<
+    'en,
+    E: fmt::Display + 'en,
+    K: IntoStream<'en> + 'en,
+    V: IntoStream<'en> + 'en,
+    S: Stream<Item = Result<(K, V), E>> + 'en,
+>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, Error>> + 'en {
     Box::pin(stream::encode_map(seq.map_err(en::Error::custom)))
 }

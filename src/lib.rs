@@ -29,7 +29,10 @@ mod tests {
         }
     }
 
-    async fn test_encode<'en, S: Stream<Item = Result<Vec<u8>, super::en::Error>> + 'en>(encoded_stream: S, expected: &str) {
+    async fn test_encode<'en, S: Stream<Item = Result<Vec<u8>, super::en::Error>> + 'en>(
+        encoded_stream: S,
+        expected: &str,
+    ) {
         let encoded = encoded_stream
             .try_fold(vec![], |mut buffer, chunk| {
                 buffer.extend(chunk);
@@ -55,7 +58,12 @@ mod tests {
         test_encode(encode_seq(seq), expected).await;
     }
 
-    async fn test_encode_map<'en, K: IntoStream<'en> + 'en, V: IntoStream<'en> + 'en, S: Stream<Item = (K, V)> + Unpin + 'en>(
+    async fn test_encode_map<
+        'en,
+        K: IntoStream<'en> + 'en,
+        V: IntoStream<'en> + 'en,
+        S: Stream<Item = (K, V)> + Unpin + 'en,
+    >(
         map: S,
         expected: &str,
     ) {
@@ -190,10 +198,7 @@ mod tests {
         test_encode_value(map.clone(), "{\"k1\":true}").await;
         test_encode_map(stream::iter(map), "{\"k1\":true}").await;
 
-        let map = BTreeMap::<i8, Option<bool>>::from_iter(vec![
-            (-1, Some(true)),
-            (2, None),
-        ]);
+        let map = BTreeMap::<i8, Option<bool>>::from_iter(vec![(-1, Some(true)), (2, None)]);
 
         test_decode("\r\n\t{ -1:\ttrue, 2:null}", map.clone()).await;
         test_encode_value(map.clone(), "{-1:true,2:null}").await;
