@@ -256,9 +256,9 @@ impl<'en> en::Encoder<'en> for Encoder {
         S: Stream<Item = Result<(K, V), Self::Error>> + 'en,
     >(
         self,
-        _map: S,
+        map: S,
     ) -> Result<Self::Ok, Self::Error> {
-        unimplemented!()
+        Ok(Box::pin(stream::JSONMapStream::from(map)))
     }
 
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {

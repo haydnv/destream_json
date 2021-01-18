@@ -14,13 +14,12 @@ mod tests {
     use std::iter::FromIterator;
 
     use destream::de::{self, FromStream, Visitor};
-    use destream::en::IntoStream;
+    use destream::en::{IntoStream, MapStream, SeqStream};
     use futures::future;
     use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
     use super::de::*;
     use super::en::*;
-    use destream::SeqStream;
 
     async fn test_decode<T: FromStream + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
         for i in 1..encoded.len() {
@@ -55,6 +54,19 @@ mod tests {
     ) {
         let seq = SeqStream::from(seq.map(Result::<T, crate::en::Error>::Ok));
         test_encode(encode(seq).unwrap(), expected).await;
+    }
+
+    async fn test_encode_map<
+        'en,
+        K: IntoStream<'en> + 'en,
+        V: IntoStream<'en> + 'en,
+        S: Stream<Item = (K, V)> + Unpin + 'en,
+    >(
+        map: S,
+        expected: &str,
+    ) {
+        let s = MapStream::from(map.map(Result::<(K, V), crate::en::Error>::Ok));
+        test_encode(encode(s).unwrap(), expected).await;
     }
 
     #[tokio::test]
@@ -182,10 +194,16 @@ mod tests {
         test_decode("\r\n\t{ \"k1\":\ttrue, \"k2\":false}", map.clone()).await;
 
         map.remove("k2");
-        test_encode_value(map, "{\"k1\":true}").await;
+        test_encode_value(map.clone(), "{\"k1\":true}").await;
+        test_encode_map(stream::iter(map), "{\"k1\":true}").await;
 
-        let map = BTreeMap::<i32, Option<bool>>::from_iter(vec![(-1, Some(true)), (2, None)]);
-        test_decode("\r\n\t{ -1:\ttrue, 2:null}", map.clone()).await;
-        test_encode_value(map, "{-1:true,2:null}").await;
+        let map = BTreeMap::<String, Option<bool>>::from_iter(vec![
+            ("-1".to_string(), Some(true)),
+            ("2".to_string(), None),
+        ]);
+
+        test_decode("\r\n\t{ \"-1\":\ttrue, \"2\":null}", map.clone()).await;
+        test_encode_value(map.clone(), "{\"-1\":true,\"2\":null}").await;
+        test_encode_map(stream::iter(map), "{\"-1\":true,\"2\":null}").await;
     }
 }
