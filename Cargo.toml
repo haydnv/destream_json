@@ -8,8 +8,8 @@ description = "Library for decoding & encoding a JSON stream"
 repository = "http://github.com/haydnv/destream_json"
 readme = "README.md"
 
-categories = ["asynchronous", "encoding", "parser-implementations", "parsing", "rust-patterns", "web-programming"]
-keywords = ["json", "stream", "streaming", "serialize", "deserialize"]
+categories = ["asynchronous", "encoding", "parser-implementations", "parsing", "web-programming"]
+keywords = ["json", "stream", "serialize", "deserialize"]
 
 
 [dependencies]
