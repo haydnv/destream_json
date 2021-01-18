@@ -258,7 +258,7 @@ impl<'en> en::Encoder<'en> for Encoder {
         self,
         map: S,
     ) -> Result<Self::Ok, Self::Error> {
-        Ok(Box::pin(stream::JSONMapStream::from(map)))
+        Ok(Box::pin(stream::encode_map(map)))
     }
 
     fn encode_seq(self, size_hint: Option<usize>) -> Result<Self::EncodeSeq, Self::Error> {
@@ -272,7 +272,7 @@ impl<'en> en::Encoder<'en> for Encoder {
         self,
         seq: S,
     ) -> Result<Self::Ok, Self::Error> {
-        Ok(Box::pin(stream::JSONListStream::from(seq)))
+        Ok(Box::pin(stream::encode_list(seq)))
     }
 
     fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {

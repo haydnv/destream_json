@@ -1,104 +1,18 @@
-use std::fmt;
 use std::pin::Pin;
 use std::task::{self, Poll};
 
 use destream::en::{self, IntoStream};
 use futures::ready;
-use futures::stream::{Fuse, FusedStream, Stream, StreamExt};
+use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
 use pin_project::pin_project;
 
 use crate::constants::*;
 
-use super::JSONStream;
+use super::{Encoder, JSONStream};
 use futures::task::Context;
 
 #[pin_project]
-pub struct JSONListStream<
-    'en,
-    E: fmt::Display,
-    I: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<I, E>> + 'en,
-> {
-    #[pin]
-    source: Fuse<S>,
-
-    next: Option<Result<JSONStream<'en>, super::Error>>,
-
-    finished: bool,
-    started: bool,
-}
-
-impl<'en, E: fmt::Display, I: IntoStream<'en>, S: Stream<Item = Result<I, E>> + 'en> Stream
-    for JSONListStream<'en, E, I, S>
-{
-    type Item = Result<Vec<u8>, super::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-
-        Poll::Ready(loop {
-            match this.next {
-                Some(Ok(next)) => match ready!(next.as_mut().poll_next(cxt)) {
-                    Some(result) => break Some(result),
-                    None => *this.next = None,
-                },
-                Some(Err(cause)) => {
-                    let result = Err(en::Error::custom(cause));
-                    *this.next = None;
-                    break Some(result);
-                }
-                None => match ready!(this.source.as_mut().poll_next(cxt)) {
-                    Some(Ok(value)) => {
-                        *this.next = Some(value.into_stream(super::Encoder));
-
-                        if *this.started {
-                            break Some(Ok(vec![COMMA]));
-                        } else {
-                            *this.started = true;
-                            break Some(Ok(vec![LIST_BEGIN]));
-                        }
-                    }
-                    Some(Err(cause)) => break Some(Err(en::Error::custom(cause))),
-                    None if !*this.started => {
-                        *this.started = true;
-                        break Some(Ok(vec![LIST_BEGIN]));
-                    }
-                    None if !*this.finished => {
-                        *this.finished = true;
-                        break Some(Ok(vec![LIST_END]));
-                    }
-                    None => break None,
-                },
-            }
-        })
-    }
-}
-
-impl<'en, E: fmt::Display, I: IntoStream<'en>, S: Stream<Item = Result<I, E>> + 'en> From<S>
-    for JSONListStream<'en, E, I, S>
-{
-    fn from(s: S) -> JSONListStream<'en, E, I, S> {
-        JSONListStream {
-            source: s.fuse(),
-            next: None,
-            finished: false,
-            started: false,
-        }
-    }
-}
-
-impl<'en, E: fmt::Display, I: IntoStream<'en>, S: Stream<Item = Result<I, E>> + 'en> FusedStream
-    for JSONListStream<'en, E, I, S>
-{
-    fn is_terminated(&self) -> bool {
-        self.finished
-    }
-}
-
-#[pin_project]
 struct JSONMapEntryStream<'en> {
-    started: bool,
-
     #[pin]
     key: Fuse<JSONStream<'en>>,
 
@@ -108,11 +22,10 @@ struct JSONMapEntryStream<'en> {
 
 impl<'en> JSONMapEntryStream<'en> {
     fn new<K: IntoStream<'en>, V: IntoStream<'en>>(key: K, value: V) -> Result<Self, super::Error> {
-        let key = key.into_stream(super::Encoder)?;
-        let value = value.into_stream(super::Encoder)?;
+        let key = key.into_stream(Encoder)?;
+        let value = value.into_stream(Encoder)?;
 
         Ok(Self {
-            started: false,
             key: key.fuse(),
             value: value.fuse(),
         })
@@ -127,19 +40,6 @@ impl<'en> Stream for JSONMapEntryStream<'en> {
 
         let result = if !this.key.is_terminated() {
             match ready!(this.key.as_mut().poll_next(cxt)) {
-                Some(result) if !*this.started => {
-                    *this.started = true;
-
-                    if let Ok(chunk) = result {
-                        if !chunk.starts_with(&[QUOTE]) {
-                            Some(Err(en::Error::custom("JSON map key must be a string")))
-                        } else {
-                            Some(Ok(chunk))
-                        }
-                    } else {
-                        Some(result)
-                    }
-                }
                 Some(result) => Some(result),
                 None => Some(Ok(vec![COLON])),
             }
@@ -163,29 +63,26 @@ impl<'en> FusedStream for JSONMapEntryStream<'en> {
 }
 
 #[pin_project]
-pub struct JSONMapStream<
-    'en,
-    E: fmt::Display,
-    K: IntoStream<'en> + 'en,
-    V: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<(K, V), E>> + 'en,
+struct JSONEncodingStream<
+    I: Stream<Item = Result<Vec<u8>, super::Error>>,
+    S: Stream<Item = Result<I, super::Error>>,
 > {
     #[pin]
     source: Fuse<S>,
 
-    next: Option<Pin<Box<JSONMapEntryStream<'en>>>>,
+    next: Option<Pin<Box<I>>>,
 
-    finished: bool,
     started: bool,
+    finished: bool,
+
+    start: u8,
+    end: u8,
 }
 
 impl<
-        'en,
-        E: fmt::Display,
-        K: IntoStream<'en>,
-        V: IntoStream<'en>,
-        S: Stream<Item = Result<(K, V), E>> + 'en,
-    > Stream for JSONMapStream<'en, E, K, V, S>
+        I: Stream<Item = Result<Vec<u8>, super::Error>>,
+        S: Stream<Item = Result<I, super::Error>>,
+    > Stream for JSONEncodingStream<I, S>
 {
     type Item = Result<Vec<u8>, super::Error>;
 
@@ -199,27 +96,24 @@ impl<
                     None => *this.next = None,
                 },
                 None => match ready!(this.source.as_mut().poll_next(cxt)) {
-                    Some(Ok((key, value))) => {
-                        match JSONMapEntryStream::new(key, value) {
-                            Ok(next) => *this.next = Some(Box::pin(next)),
-                            Err(cause) => break Some(Err(cause)),
-                        }
+                    Some(Ok(next)) => {
+                        *this.next = Some(Box::pin(next));
 
                         if *this.started {
                             break Some(Ok(vec![COMMA]));
                         } else {
                             *this.started = true;
-                            break Some(Ok(vec![MAP_BEGIN]));
+                            break Some(Ok(vec![*this.start]));
                         }
                     }
                     Some(Err(cause)) => break Some(Err(en::Error::custom(cause))),
                     None if !*this.started => {
                         *this.started = true;
-                        break Some(Ok(vec![MAP_BEGIN]));
+                        break Some(Ok(vec![*this.start]));
                     }
                     None if !*this.finished => {
                         *this.finished = true;
-                        break Some(Ok(vec![MAP_END]));
+                        break Some(Ok(vec![*this.end]));
                     }
                     None => break None,
                 },
@@ -229,32 +123,50 @@ impl<
 }
 
 impl<
-        'en,
-        E: fmt::Display,
-        K: IntoStream<'en>,
-        V: IntoStream<'en>,
-        S: Stream<Item = Result<(K, V), E>> + 'en,
-    > From<S> for JSONMapStream<'en, E, K, V, S>
-{
-    fn from(s: S) -> JSONMapStream<'en, E, K, V, S> {
-        JSONMapStream {
-            source: s.fuse(),
-            next: None,
-            finished: false,
-            started: false,
-        }
-    }
-}
-
-impl<
-        'en,
-        E: fmt::Display,
-        K: IntoStream<'en>,
-        V: IntoStream<'en>,
-        S: Stream<Item = Result<(K, V), E>> + 'en,
-    > FusedStream for JSONMapStream<'en, E, K, V, S>
+        I: Stream<Item = Result<Vec<u8>, super::Error>>,
+        S: Stream<Item = Result<I, super::Error>>,
+    > FusedStream for JSONEncodingStream<I, S>
 {
     fn is_terminated(&self) -> bool {
         self.finished
+    }
+}
+
+pub fn encode_list<'en, I: IntoStream<'en>, S: Stream<Item = Result<I, super::Error>> + 'en>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + 'en {
+    let source = seq
+        .map(|result| result.and_then(|element| element.into_stream(Encoder)))
+        .map_err(en::Error::custom);
+
+    JSONEncodingStream {
+        source: source.fuse(),
+        next: None,
+        started: false,
+        finished: false,
+        start: LIST_BEGIN,
+        end: LIST_END,
+    }
+}
+
+pub fn encode_map<
+    'en,
+    K: IntoStream<'en>,
+    V: IntoStream<'en>,
+    S: Stream<Item = Result<(K, V), super::Error>> + 'en,
+>(
+    seq: S,
+) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + 'en {
+    let source = seq
+        .map(|result| result.and_then(|(key, value)| JSONMapEntryStream::new(key, value)))
+        .map_err(en::Error::custom);
+
+    JSONEncodingStream {
+        source: source.fuse(),
+        next: None,
+        started: false,
+        finished: false,
+        start: MAP_BEGIN,
+        end: MAP_END,
     }
 }
