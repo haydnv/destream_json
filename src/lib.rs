@@ -8,6 +8,13 @@
 //! let actual = block_on(destream_json::try_decode(stream)).unwrap();
 //! assert_eq!(expected, actual);
 //! ```
+//!
+//! Deviations from the [JSON spec](https://www.json.org/):
+//!  - `destream_json` will not error out if asked to decode or encode a non-string key in a JSON
+//!    object (i.e., it supports a superset of the official JSON spec). This may cause issues
+//!    when using another JSON library to decode a stream encoded by `destream_json`. This can be
+//!    mitigated by simply not using non-string object keys, or adding an explicit check at encoding
+//!    time.
 
 mod constants;
 pub mod de;
