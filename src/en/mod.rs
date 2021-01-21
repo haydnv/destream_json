@@ -1,4 +1,4 @@
-//! Serialize a Rust data structure into JSON data.
+//! Encode a Rust data structure into JSON data.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -19,6 +19,8 @@ pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + S
 pub struct Error {
     message: String,
 }
+
+impl std::error::Error for Error {}
 
 impl en::Error for Error {
     fn custom<I: fmt::Display>(info: I) -> Self {

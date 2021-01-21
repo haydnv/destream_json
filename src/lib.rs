@@ -67,7 +67,11 @@ mod tests {
         test_encode(encode(value).unwrap(), expected).await;
     }
 
-    async fn test_encode_list<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Send + Unpin + 'en>(
+    async fn test_encode_list<
+        'en,
+        T: IntoStream<'en> + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
+    >(
         seq: S,
         expected: &str,
     ) {
