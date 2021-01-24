@@ -50,6 +50,7 @@ impl fmt::Display for Error {
 struct MapAccess<'a, S> {
     decoder: &'a mut Decoder<S>,
     size_hint: Option<usize>,
+    done: bool,
 }
 
 impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> MapAccess<'a, S> {
@@ -59,8 +60,15 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> MapAccess
     ) -> Result<MapAccess<'a, S>, Error> {
         decoder.expect_whitespace().await?;
         decoder.expect_byte(MAP_BEGIN).await?;
+        decoder.expect_whitespace().await?;
 
-        Ok(MapAccess { decoder, size_hint })
+        let done = decoder.maybe_byte(MAP_END).await?;
+
+        Ok(MapAccess {
+            decoder,
+            size_hint,
+            done,
+        })
     }
 }
 
@@ -71,12 +79,11 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
     type Error = Error;
 
     async fn next_key<K: FromStream>(&mut self) -> Result<Option<K>, Error> {
-        self.decoder.expect_whitespace().await?;
-
-        if self.decoder.maybe_byte(MAP_END).await? {
+        if self.done {
             return Ok(None);
         }
 
+        self.decoder.expect_whitespace().await?;
         let key = K::from_stream(self.decoder).await?;
         Ok(Some(key))
     }
@@ -88,7 +95,13 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
 
         let value = V::from_stream(self.decoder).await?;
 
-        self.decoder.expect_comma_or(MAP_END).await?;
+        self.decoder.expect_whitespace().await?;
+
+        if self.decoder.maybe_byte(MAP_END).await? {
+            self.done = true;
+        } else {
+            self.decoder.expect_byte(COMMA).await?;
+        }
 
         Ok(value)
     }
@@ -110,6 +123,7 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
 struct SeqAccess<'a, S> {
     decoder: &'a mut Decoder<S>,
     size_hint: Option<usize>,
+    done: bool,
 }
 
 impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> SeqAccess<'a, S> {
@@ -119,8 +133,15 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> SeqAccess
     ) -> Result<SeqAccess<'a, S>, Error> {
         decoder.expect_whitespace().await?;
         decoder.expect_byte(LIST_BEGIN).await?;
+        decoder.expect_whitespace().await?;
 
-        Ok(SeqAccess { decoder, size_hint })
+        let done = decoder.maybe_byte(LIST_END).await?;
+
+        Ok(SeqAccess {
+            decoder,
+            size_hint,
+            done,
+        })
     }
 }
 
@@ -131,14 +152,20 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::SeqAc
     type Error = Error;
 
     async fn next_element<T: FromStream>(&mut self) -> Result<Option<T>, Self::Error> {
-        self.decoder.expect_whitespace().await?;
-
-        if self.decoder.maybe_byte(LIST_END).await? {
+        if self.done {
             return Ok(None);
         }
 
+        self.decoder.expect_whitespace().await?;
         let value = T::from_stream(self.decoder).await?;
-        self.decoder.expect_comma_or(LIST_END).await?;
+        self.decoder.expect_whitespace().await?;
+
+        if self.decoder.maybe_byte(LIST_END).await? {
+            self.done = true;
+        } else {
+            self.decoder.expect_byte(COMMA).await?;
+        }
+
         Ok(Some(value))
     }
 
@@ -248,22 +275,6 @@ impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> Decoder<S> {
                 next_char as char,
                 &format!("{}", (byte as char)),
             ))
-        }
-    }
-
-    async fn expect_comma_or(&mut self, byte: u8) -> Result<(), Error> {
-        self.expect_whitespace().await?;
-
-        while self.buffer.is_empty() && !self.source.is_terminated() {
-            self.buffer().await?;
-        }
-
-        if self.buffer.is_empty() {
-            Err(Error::unexpected_end())
-        } else if self.buffer[0] == byte {
-            Ok(())
-        } else {
-            self.expect_byte(COMMA).await
         }
     }
 

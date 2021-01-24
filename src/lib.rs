@@ -213,7 +213,7 @@ mod tests {
             ("k2".to_string(), false),
         ]);
 
-        test_decode("\r\n\t{ \"k1\":\ttrue, \"k2\":false}", map.clone()).await;
+        test_decode("\r\n\t{ \"k1\":\ttrue  , \"k2\": false\r\n}", map.clone()).await;
 
         map.remove("k2");
         test_encode_value(map.clone(), "{\"k1\":true}").await;
