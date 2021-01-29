@@ -29,6 +29,7 @@ mod tests {
     use std::fmt;
     use std::iter::FromIterator;
 
+    use async_trait::async_trait;
     use destream::de::{self, FromStream, Visitor};
     use destream::en::IntoStream;
     use futures::future;
@@ -36,6 +37,7 @@ mod tests {
 
     use super::de::*;
     use super::en::*;
+    use pin_project::__private::PhantomData;
 
     async fn test_decode<T: FromStream + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
         for i in 1..encoded.len() {
@@ -224,5 +226,68 @@ mod tests {
         test_decode("\r\n\t{ -1:\ttrue, 2:null}", map.clone()).await;
         test_encode_value(map.clone(), "{-1:true,2:null}").await;
         test_encode_map(stream::iter(map), "{-1:true,2:null}").await;
+    }
+
+    #[tokio::test]
+    async fn test_err() {
+        #[derive(Debug, Default, Eq, PartialEq)]
+        struct TestMap;
+
+        #[async_trait]
+        impl FromStream for TestMap {
+            async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+                decoder.decode_map(TestVisitor::<Self>::default()).await
+            }
+        }
+
+        #[derive(Debug, Default, Eq, PartialEq)]
+        struct TestSeq;
+
+        #[async_trait]
+        impl FromStream for TestSeq {
+            async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+                decoder.decode_seq(TestVisitor::<Self>::default()).await
+            }
+        }
+
+        #[derive(Default)]
+        struct TestVisitor<T> {
+            phantom: PhantomData<T>,
+        }
+
+        #[async_trait]
+        impl<T: Default + Send> de::Visitor for TestVisitor<T> {
+            type Value = T;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a Test struct")
+            }
+
+            async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<T, A::Error> {
+                let _key = access.next_key::<String>().await?;
+
+                assert!(access.next_value::<String>().await.is_err());
+                assert!(access.next_value::<Vec<i64>>().await.is_ok());
+
+                Ok(T::default())
+            }
+
+            async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<T, A::Error> {
+                assert!(access.next_element::<String>().await.is_err());
+                assert!(access.next_element::<Vec<i64>>().await.is_err());
+                assert!(access.next_element::<i64>().await.is_ok());
+                Ok(T::default())
+            }
+        }
+
+        let encoded = "{\"k1\": [1, 2, 3]}";
+        let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(5);
+        let actual: TestMap = decode(source).await.unwrap();
+        assert_eq!(actual, TestMap);
+
+        let encoded = "\t[ 1,2, 3]";
+        let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(2);
+        let actual: TestSeq = decode(source).await.unwrap();
+        assert_eq!(actual, TestSeq);
     }
 }
