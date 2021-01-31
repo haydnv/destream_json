@@ -5,7 +5,7 @@
 //! # use futures::executor::block_on;
 //! let expected = ("one".to_string(), 2.0, vec![3, 4]);
 //! let stream = destream_json::encode(&expected).unwrap();
-//! let actual = block_on(destream_json::try_decode(stream)).unwrap();
+//! let actual = block_on(destream_json::try_decode((), stream)).unwrap();
 //! assert_eq!(expected, actual);
 //! ```
 //!
@@ -39,10 +39,10 @@ mod tests {
     use super::en::*;
     use pin_project::__private::PhantomData;
 
-    async fn test_decode<T: FromStream + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
+    async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
         for i in 1..encoded.len() {
             let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(i);
-            let actual: T = decode(source).await.unwrap();
+            let actual: T = decode((), source).await.unwrap();
             assert_eq!(expected, actual)
         }
     }
@@ -143,8 +143,8 @@ mod tests {
         impl Visitor for BytesVisitor {
             type Value = Vec<u8>;
 
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a byte buffer")
+            fn expecting() -> &'static str {
+                "a byte buffer"
             }
 
             fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
@@ -235,7 +235,9 @@ mod tests {
 
         #[async_trait]
         impl FromStream for TestMap {
-            async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+            type Context = ();
+
+            async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
                 decoder.decode_map(TestVisitor::<Self>::default()).await
             }
         }
@@ -245,7 +247,9 @@ mod tests {
 
         #[async_trait]
         impl FromStream for TestSeq {
-            async fn from_stream<D: de::Decoder>(decoder: &mut D) -> Result<Self, D::Error> {
+            type Context = ();
+
+            async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
                 decoder.decode_seq(TestVisitor::<Self>::default()).await
             }
         }
@@ -259,35 +263,35 @@ mod tests {
         impl<T: Default + Send> de::Visitor for TestVisitor<T> {
             type Value = T;
 
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("a Test struct")
+            fn expecting() -> &'static str {
+                "a Test struct"
             }
 
             async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<T, A::Error> {
-                let _key = access.next_key::<String>().await?;
+                let _key = access.next_key::<String>(()).await?;
 
-                assert!(access.next_value::<String>().await.is_err());
-                assert!(access.next_value::<Vec<i64>>().await.is_ok());
+                assert!(access.next_value::<String>(()).await.is_err());
+                assert!(access.next_value::<Vec<i64>>(()).await.is_ok());
 
                 Ok(T::default())
             }
 
             async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<T, A::Error> {
-                assert!(access.next_element::<String>().await.is_err());
-                assert!(access.next_element::<Vec<i64>>().await.is_err());
-                assert!(access.next_element::<i64>().await.is_ok());
+                assert!(access.next_element::<String>(()).await.is_err());
+                assert!(access.next_element::<Vec<i64>>(()).await.is_err());
+                assert!(access.next_element::<i64>(()).await.is_ok());
                 Ok(T::default())
             }
         }
 
         let encoded = "{\"k1\": [1, 2, 3]}";
         let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(5);
-        let actual: TestMap = decode(source).await.unwrap();
+        let actual: TestMap = decode((), source).await.unwrap();
         assert_eq!(actual, TestMap);
 
         let encoded = "\t[ 1,2, 3]";
         let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(2);
-        let actual: TestSeq = decode(source).await.unwrap();
+        let actual: TestSeq = decode((), source).await.unwrap();
         assert_eq!(actual, TestSeq);
     }
 }

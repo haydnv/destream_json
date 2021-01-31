@@ -78,13 +78,13 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
 {
     type Error = Error;
 
-    async fn next_key<K: FromStream>(&mut self) -> Result<Option<K>, Error> {
+    async fn next_key<K: FromStream>(&mut self, context: K::Context) -> Result<Option<K>, Error> {
         if self.done {
             return Ok(None);
         }
 
         self.decoder.expect_whitespace().await?;
-        let key = K::from_stream(self.decoder).await?;
+        let key = K::from_stream(context, self.decoder).await?;
 
         self.decoder.expect_whitespace().await?;
         self.decoder.expect_byte(COLON).await?;
@@ -93,8 +93,8 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
         Ok(Some(key))
     }
 
-    async fn next_value<V: FromStream>(&mut self) -> Result<V, Error> {
-        let value = V::from_stream(self.decoder).await?;
+    async fn next_value<V: FromStream>(&mut self, context: V::Context) -> Result<V, Error> {
+        let value = V::from_stream(context, self.decoder).await?;
         self.decoder.expect_whitespace().await?;
 
         if self.decoder.maybe_byte(MAP_END).await? {
@@ -104,15 +104,6 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAc
         }
 
         Ok(value)
-    }
-
-    async fn next_entry<K: FromStream, V: FromStream>(&mut self) -> Result<Option<(K, V)>, Error> {
-        if let Some(key) = self.next_key().await? {
-            let value = self.next_value().await?;
-            Ok(Some((key, value)))
-        } else {
-            Ok(None)
-        }
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -151,13 +142,16 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::SeqAc
 {
     type Error = Error;
 
-    async fn next_element<T: FromStream>(&mut self) -> Result<Option<T>, Self::Error> {
+    async fn next_element<T: FromStream>(
+        &mut self,
+        context: T::Context,
+    ) -> Result<Option<T>, Self::Error> {
         if self.done {
             return Ok(None);
         }
 
         self.decoder.expect_whitespace().await?;
-        let value = T::from_stream(self.decoder).await?;
+        let value = T::from_stream(context, self.decoder).await?;
         self.decoder.expect_whitespace().await?;
 
         if self.decoder.maybe_byte(LIST_END).await? {
@@ -584,22 +578,24 @@ impl<S: Stream> From<S> for Decoder<S> {
     }
 }
 
-/// Decode the given JSON-encoded stream of bytes into an instance of `T`.
+/// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
 pub async fn decode<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
+    context: T::Context,
     source: S,
 ) -> Result<T, Error> {
     let source = source.map(Result::<Vec<u8>, Error>::Ok);
-    T::from_stream(&mut Decoder::from(source)).await
+    T::from_stream(context, &mut Decoder::from(source)).await
 }
 
-/// Decode the given JSON-encoded stream of bytes into an instance of `T`.
+/// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
 pub async fn try_decode<
     E: fmt::Display,
     S: Stream<Item = Result<Vec<u8>, E>> + Send + Unpin,
     T: FromStream,
 >(
+    context: T::Context,
     source: S,
 ) -> Result<T, Error> {
     let source = source.map_err(de::Error::custom);
-    T::from_stream(&mut Decoder::from(source)).await
+    T::from_stream(context, &mut Decoder::from(source)).await
 }
