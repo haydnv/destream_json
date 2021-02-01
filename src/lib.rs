@@ -28,8 +28,10 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fmt;
     use std::iter::FromIterator;
+    use std::marker::PhantomData;
 
     use async_trait::async_trait;
+    use bytes::Bytes;
     use destream::de::{self, FromStream, Visitor};
     use destream::en::IntoStream;
     use futures::future;
@@ -37,7 +39,6 @@ mod tests {
 
     use super::de::*;
     use super::en::*;
-    use pin_project::__private::PhantomData;
 
     async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(
         encoded: &str,
@@ -155,19 +156,12 @@ mod tests {
             }
         }
 
-        let expected = "मकर संक्रान्ति";
-        let mut decoder = Decoder::from(stream::once(future::ready(Ok(format!(
-            "\"{}\"",
-            base64::encode(expected.as_bytes())
-        )
-        .as_bytes()
-        .to_vec()))));
+        let utf8_str = "मकर संक्रान्ति";
 
-        let actual = de::Decoder::decode_byte_buf(&mut decoder, BytesVisitor)
-            .await
-            .unwrap();
+        let encoded = encode(Bytes::from(utf8_str.as_bytes())).unwrap();
+        let decoded: Bytes = try_decode((), encoded).await.unwrap();
 
-        assert_eq!(expected.as_bytes().to_vec(), actual);
+        assert_eq!(utf8_str, std::str::from_utf8(&decoded).unwrap());
     }
 
     #[tokio::test]

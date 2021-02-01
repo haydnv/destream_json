@@ -15,10 +15,11 @@ keywords = ["json", "stream", "serialize", "deserialize"]
 [dependencies]
 async-trait = "0.1"
 base64 = "0.13"
-destream = { path = "../destream" }
+destream = "0.3"
 futures = "0.3"
 pin-project = "1.0"
 
 [dev-dependencies]
+bytes = "1.0"
 tokio = { version = "1.0", features = ["macros"] }
 tokio-test = "0.4"
