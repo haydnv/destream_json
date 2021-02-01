@@ -39,7 +39,10 @@ mod tests {
     use super::en::*;
     use pin_project::__private::PhantomData;
 
-    async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(encoded: &str, expected: T) {
+    async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(
+        encoded: &str,
+        expected: T,
+    ) {
         for i in 1..encoded.len() {
             let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(i);
             let actual: T = decode((), source).await.unwrap();

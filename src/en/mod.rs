@@ -256,6 +256,12 @@ impl<'en> en::Encoder<'en> for Encoder {
     }
 
     #[inline]
+    fn encode_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        let encoded = base64::encode(v);
+        self.encode_str(&encoded)
+    }
+
+    #[inline]
     fn encode_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt("null"))
     }
