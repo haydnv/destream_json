@@ -18,7 +18,7 @@ pub trait Read: Send + Unpin {
     fn is_terminated(&self) -> bool;
 }
 
-struct SourceStream<S> {
+pub struct SourceStream<S> {
     source: Fuse<S>,
 }
 
@@ -41,7 +41,7 @@ impl<S: Stream> From<S> for SourceStream<S> {
     }
 }
 
-struct SourceReader<R: AsyncRead> {
+pub struct SourceReader<R: AsyncRead> {
     reader: BufReader<R>,
     terminated: bool,
 }
@@ -232,13 +232,39 @@ impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
 }
 
 /// A structure that decodes Rust values from a JSON stream.
-pub struct Decoder<S> {
-    source: S,
+pub struct Decoder<R> {
+    source: R,
     buffer: Vec<u8>,
     numeric: HashSet<u8>,
 }
 
-impl<S: Read> Decoder<S> {
+impl<A: AsyncRead> Decoder<A>
+where
+    SourceReader<A>: Read,
+{
+    pub fn from_reader(reader: A) -> Decoder<SourceReader<A>> {
+        Decoder {
+            source: SourceReader::from(reader),
+            buffer: Vec::new(),
+            numeric: NUMERIC.iter().cloned().collect(),
+        }
+    }
+}
+
+impl<S: Stream> Decoder<SourceStream<S>>
+where
+    SourceStream<S>: Read,
+{
+    pub fn from_stream(stream: S) -> Decoder<SourceStream<S>> {
+        Decoder {
+            source: SourceStream::from(stream),
+            buffer: Vec::new(),
+            numeric: NUMERIC.iter().cloned().collect(),
+        }
+    }
+}
+
+impl<R: Read> Decoder<R> {
     async fn buffer(&mut self) -> Result<(), Error> {
         if let Some(data) = self.source.next().await {
             self.buffer.extend(data?);
@@ -453,7 +479,7 @@ impl<S: Read> Decoder<S> {
 }
 
 #[async_trait]
-impl<S: Read> de::Decoder for Decoder<S> {
+impl<R: Read> de::Decoder for Decoder<R> {
     type Error = Error;
 
     async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -631,23 +657,13 @@ impl<S: Read> de::Decoder for Decoder<S> {
     }
 }
 
-impl<S: Read> From<S> for Decoder<S> {
-    fn from(source: S) -> Self {
-        Self {
-            source,
-            buffer: vec![],
-            numeric: NUMERIC.iter().cloned().collect(),
-        }
-    }
-}
-
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
 pub async fn decode<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
     context: T::Context,
     source: S,
 ) -> Result<T, Error> {
-    let source = source.map(Result::<Vec<u8>, Error>::Ok);
-    T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
+    let mut decoder = Decoder::from_stream(source.map(Result::<Vec<u8>, Error>::Ok));
+    T::from_stream(context, &mut decoder).await
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
@@ -659,14 +675,14 @@ pub async fn try_decode<
     context: T::Context,
     source: S,
 ) -> Result<T, Error> {
-    let source = source.map_err(de::Error::custom);
-    T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
+    let mut decoder = Decoder::from_stream(source.map_err(|e| de::Error::custom(e)));
+    T::from_stream(context, &mut decoder).await
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
-pub async fn read_from<S: AsyncReadExt + Send + Unpin, T: FromStream>(
+pub async fn read_from<R: AsyncReadExt + Send + Unpin, T: FromStream>(
     context: T::Context,
-    source: S,
+    source: R,
 ) -> Result<T, Error> {
-    T::from_stream(context, &mut Decoder::from(SourceReader::from(source))).await
+    T::from_stream(context, &mut Decoder::from_reader(source)).await
 }

@@ -278,6 +278,7 @@ mod tests {
                 assert!(access.next_element::<String>(()).await.is_err());
                 assert!(access.next_element::<Vec<i64>>(()).await.is_err());
                 assert!(access.next_element::<i64>(()).await.is_ok());
+
                 Ok(T::default())
             }
         }
