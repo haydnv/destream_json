@@ -7,8 +7,75 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
+use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::constants::*;
+
+#[async_trait]
+pub trait Read: Send + Unpin {
+    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>>;
+
+    fn is_terminated(&self) -> bool;
+}
+
+struct SourceStream<S> {
+    source: Fuse<S>,
+}
+
+#[async_trait]
+impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> Read for SourceStream<S> {
+    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
+        self.source.next().await
+    }
+
+    fn is_terminated(&self) -> bool {
+        self.source.is_terminated()
+    }
+}
+
+impl<S: Stream> From<S> for SourceStream<S> {
+    fn from(source: S) -> Self {
+        Self {
+            source: source.fuse(),
+        }
+    }
+}
+
+struct SourceReader<R: AsyncRead> {
+    reader: BufReader<R>,
+    terminated: bool,
+}
+
+#[async_trait]
+impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
+    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
+        let mut chunk = Vec::new();
+        match self.reader.read_buf(&mut chunk).await {
+            Ok(0) => {
+                self.terminated = true;
+                Some(Ok(chunk))
+            }
+            Ok(size) => {
+                debug_assert_eq!(chunk.len(), size);
+                Some(Ok(chunk))
+            }
+            Err(cause) => Some(Err(de::Error::custom(format!("io error: {}", cause)))),
+        }
+    }
+
+    fn is_terminated(&self) -> bool {
+        self.terminated
+    }
+}
+
+impl<R: AsyncRead> From<R> for SourceReader<R> {
+    fn from(reader: R) -> Self {
+        Self {
+            reader: BufReader::new(reader),
+            terminated: false,
+        }
+    }
+}
 
 /// An error encountered while decoding a JSON stream.
 pub struct Error {
@@ -53,7 +120,7 @@ struct MapAccess<'a, S> {
     done: bool,
 }
 
-impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> MapAccess<'a, S> {
+impl<'a, S: Read + 'a> MapAccess<'a, S> {
     async fn new(
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
@@ -73,9 +140,7 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> MapAccess
 }
 
 #[async_trait]
-impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::MapAccess
-    for MapAccess<'a, S>
-{
+impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
     type Error = Error;
 
     async fn next_key<K: FromStream>(&mut self, context: K::Context) -> Result<Option<K>, Error> {
@@ -117,7 +182,7 @@ struct SeqAccess<'a, S> {
     done: bool,
 }
 
-impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> SeqAccess<'a, S> {
+impl<'a, S: Read + 'a> SeqAccess<'a, S> {
     async fn new(
         decoder: &'a mut Decoder<S>,
         size_hint: Option<usize>,
@@ -137,9 +202,7 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> SeqAccess
 }
 
 #[async_trait]
-impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::SeqAccess
-    for SeqAccess<'a, S>
-{
+impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     type Error = Error;
 
     async fn next_element<T: FromStream>(
@@ -170,12 +233,12 @@ impl<'a, S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin + 'a> de::SeqAc
 
 /// A structure that decodes Rust values from a JSON stream.
 pub struct Decoder<S> {
-    source: Fuse<S>,
+    source: S,
     buffer: Vec<u8>,
     numeric: HashSet<u8>,
 }
 
-impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> Decoder<S> {
+impl<S: Read> Decoder<S> {
     async fn buffer(&mut self) -> Result<(), Error> {
         if let Some(data) = self.source.next().await {
             self.buffer.extend(data?);
@@ -390,7 +453,7 @@ impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> Decoder<S> {
 }
 
 #[async_trait]
-impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> de::Decoder for Decoder<S> {
+impl<S: Read> de::Decoder for Decoder<S> {
     type Error = Error;
 
     async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -568,10 +631,10 @@ impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> de::Decoder for De
     }
 }
 
-impl<S: Stream> From<S> for Decoder<S> {
+impl<S: Read> From<S> for Decoder<S> {
     fn from(source: S) -> Self {
         Self {
-            source: source.fuse(),
+            source,
             buffer: vec![],
             numeric: NUMERIC.iter().cloned().collect(),
         }
@@ -584,7 +647,7 @@ pub async fn decode<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
     source: S,
 ) -> Result<T, Error> {
     let source = source.map(Result::<Vec<u8>, Error>::Ok);
-    T::from_stream(context, &mut Decoder::from(source)).await
+    T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
@@ -597,5 +660,13 @@ pub async fn try_decode<
     source: S,
 ) -> Result<T, Error> {
     let source = source.map_err(de::Error::custom);
-    T::from_stream(context, &mut Decoder::from(source)).await
+    T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
+}
+
+/// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
+pub async fn read_from<S: AsyncReadExt + Send + Unpin, T: FromStream>(
+    context: T::Context,
+    source: S,
+) -> Result<T, Error> {
+    T::from_stream(context, &mut Decoder::from(SourceReader::from(source))).await
 }

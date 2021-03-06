@@ -20,13 +20,14 @@ mod constants;
 pub mod de;
 pub mod en;
 
-pub use de::{decode, try_decode};
+pub use de::{decode, read_from, try_decode};
 pub use en::{encode, encode_map, encode_seq};
 
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fmt;
+    use std::io::Cursor;
     use std::iter::FromIterator;
     use std::marker::PhantomData;
 
@@ -290,5 +291,17 @@ mod tests {
         let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(2);
         let actual: TestSeq = decode((), source).await.unwrap();
         assert_eq!(actual, TestSeq);
+    }
+
+    #[tokio::test]
+    async fn test_async_read() {
+        let encoded = "[\"hello\", 1, {}]";
+        let cursor = Cursor::new(encoded.as_bytes());
+        let decoded: (String, i64, HashMap<String, bool>) = read_from((), cursor).await.unwrap();
+
+        assert_eq!(
+            decoded,
+            ("hello".to_string(), 1i64, HashMap::<String, bool>::new())
+        );
     }
 }
