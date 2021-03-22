@@ -7,6 +7,8 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
+
+#[cfg(tokio_io)]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::constants::*;
@@ -41,11 +43,13 @@ impl<S: Stream> From<S> for SourceStream<S> {
     }
 }
 
+#[cfg(tokio_io)]
 pub struct SourceReader<R: AsyncRead> {
     reader: BufReader<R>,
     terminated: bool,
 }
 
+#[cfg(tokio_io)]
 #[async_trait]
 impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     async fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
@@ -68,6 +72,7 @@ impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     }
 }
 
+#[cfg(tokio_io)]
 impl<R: AsyncRead> From<R> for SourceReader<R> {
     fn from(reader: R) -> Self {
         Self {
@@ -238,6 +243,7 @@ pub struct Decoder<R> {
     numeric: HashSet<u8>,
 }
 
+#[cfg(tokio_io)]
 impl<A: AsyncRead> Decoder<A>
 where
     SourceReader<A>: Read,
@@ -680,6 +686,7 @@ pub async fn try_decode<
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
+#[cfg(tokio_io)]
 pub async fn read_from<R: AsyncReadExt + Send + Unpin, T: FromStream>(
     context: T::Context,
     source: R,

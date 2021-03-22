@@ -20,14 +20,16 @@ mod constants;
 pub mod de;
 pub mod en;
 
-pub use de::{decode, read_from, try_decode};
+pub use de::{decode, try_decode};
 pub use en::{encode, encode_map, encode_seq};
+
+#[cfg(tokio_io)]
+pub use de::read_from;
 
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fmt;
-    use std::io::Cursor;
     use std::iter::FromIterator;
     use std::marker::PhantomData;
 
@@ -294,8 +296,11 @@ mod tests {
         assert_eq!(actual, TestSeq);
     }
 
+    #[cfg(tokio_io)]
     #[tokio::test]
     async fn test_async_read() {
+        use std::io::Cursor;
+
         let encoded = "[\"hello\", 1, {}]";
         let cursor = Cursor::new(encoded.as_bytes());
         let decoded: (String, i64, HashMap<String, bool>) = read_from((), cursor).await.unwrap();
