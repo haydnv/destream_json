@@ -7,7 +7,6 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
-use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 #[cfg(tokio_io)]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
