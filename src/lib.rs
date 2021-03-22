@@ -30,6 +30,7 @@ pub use de::read_from;
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fmt;
+    use std::io::Cursor;
     use std::iter::FromIterator;
     use std::marker::PhantomData;
 
@@ -49,7 +50,7 @@ mod tests {
     ) {
         for i in 1..encoded.len() {
             let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(i);
-            let actual: T = decode((), source).await.unwrap();
+            let actual: T = de::decode((), source).await.unwrap();
             assert_eq!(expected, actual)
         }
     }
@@ -287,12 +288,12 @@ mod tests {
 
         let encoded = "{\"k1\": [1, 2, 3]}";
         let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(5);
-        let actual: TestMap = decode((), source).await.unwrap();
+        let actual: TestMap = de::decode((), source).await.unwrap();
         assert_eq!(actual, TestMap);
 
         let encoded = "\t[ 1,2, 3]";
         let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(2);
-        let actual: TestSeq = decode((), source).await.unwrap();
+        let actual: TestSeq = de::decode((), source).await.unwrap();
         assert_eq!(actual, TestSeq);
     }
 
