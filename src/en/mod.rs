@@ -5,7 +5,7 @@ use std::fmt;
 use std::mem;
 use std::pin::Pin;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use destream::en::{self, IntoStream};
 use futures::future;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -253,7 +253,13 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     #[inline]
     fn encode_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(encode_fmt(format!("\"{}\"", v)))
+        let mut chunk = BytesMut::with_capacity(v.as_bytes().len() + 2);
+        chunk.extend_from_slice(QUOTE);
+        chunk.extend(escape(v));
+        chunk.extend_from_slice(QUOTE);
+        Ok(Box::pin(futures::stream::once(future::ready(Ok(
+            chunk.into()
+        )))))
     }
 
     #[inline]
@@ -317,9 +323,24 @@ impl<'en> en::Encoder<'en> for Encoder {
 }
 
 #[inline]
+fn escape<T: fmt::Display>(value: T) -> Bytes {
+    let as_str = value.to_string();
+    let mut encoded = BytesMut::with_capacity(as_str.len());
+    for byte in as_str.as_bytes() {
+        if std::slice::from_ref(byte) == QUOTE {
+            encoded.extend_from_slice(ESCAPE);
+        }
+
+        encoded.put_u8(*byte);
+    }
+
+    encoded.into()
+}
+
+#[inline]
 fn encode_fmt<'en, T: fmt::Display>(value: T) -> JSONStream<'en> {
-    let encoded = Bytes::copy_from_slice(value.to_string().as_bytes());
-    Box::pin(futures::stream::once(future::ready(Ok(encoded))))
+    let encoded = escape(value);
+    Box::pin(futures::stream::once(future::ready(Ok(encoded.into()))))
 }
 
 #[inline]

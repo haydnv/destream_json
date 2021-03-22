@@ -140,10 +140,12 @@ mod tests {
         test_encode_value(-1.414e4_f64, "-14140").await;
 
         test_decode("\t\r\n\" hello world \"", " hello world ".to_string()).await;
-        test_decode("\"one \\\" two\"", "one \\\" two".to_string()).await;
-
         test_encode_value("hello world", "\"hello world\"").await;
-        test_encode_value("one \\\" two", "\"one \\\" two\"").await;
+
+        let nested = "string \"within\" string".to_string();
+        let expected = "\"string \\\"within\\\" string\"";
+        test_encode_value(nested.clone(), expected).await;
+        test_decode(expected, nested).await;
     }
 
     #[tokio::test]

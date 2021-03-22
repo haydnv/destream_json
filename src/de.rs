@@ -5,7 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
 
@@ -301,7 +301,27 @@ impl<S: Read> Decoder<S> {
             }
         }
 
-        let s = self.buffer.drain(0..i).collect();
+        let mut s = Vec::with_capacity(i);
+        let mut escape = false;
+        for byte in self.buffer.drain(0..i) {
+            let as_slice = std::slice::from_ref(&byte);
+            if escape {
+                if as_slice == QUOTE {
+                    // no-op
+                } else {
+                    s.extend_from_slice(ESCAPE);
+                }
+
+                s.put_u8(byte);
+                escape = false;
+            } else if as_slice == ESCAPE {
+                escape = true;
+            } else {
+                s.put_u8(byte);
+            }
+        }
+        println!("decoded string: {}", String::from_utf8(s.to_vec()).unwrap());
+
         self.buffer.remove(0); // process the end quote
         self.buffer.shrink_to_fit();
         Ok(s)
