@@ -48,13 +48,15 @@ mod tests {
         expected: T,
     ) {
         for i in 1..encoded.len() {
-            let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(i);
+            let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+                .chunks(i)
+                .map(Bytes::from);
             let actual: T = decode((), source).await.unwrap();
             assert_eq!(expected, actual)
         }
     }
 
-    async fn test_encode<'en, S: Stream<Item = Result<Vec<u8>, super::en::Error>> + 'en>(
+    async fn test_encode<'en, S: Stream<Item = Result<Bytes, super::en::Error>> + 'en>(
         encoded_stream: S,
         expected: &str,
     ) {
@@ -286,12 +288,18 @@ mod tests {
         }
 
         let encoded = "{\"k1\": [1, 2, 3]}";
-        let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(5);
+        let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+            .chunks(5)
+            .map(Bytes::from);
+
         let actual: TestMap = decode((), source).await.unwrap();
         assert_eq!(actual, TestMap);
 
         let encoded = "\t[ 1,2, 3]";
-        let source = stream::iter(encoded.as_bytes().into_iter().cloned()).chunks(2);
+        let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+            .chunks(2)
+            .map(Bytes::from);
+
         let actual: TestSeq = decode((), source).await.unwrap();
         assert_eq!(actual, TestSeq);
     }

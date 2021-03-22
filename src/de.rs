@@ -5,6 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
 
@@ -15,7 +16,7 @@ use crate::constants::*;
 
 #[async_trait]
 pub trait Read: Send + Unpin {
-    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>>;
+    async fn next(&mut self) -> Option<Result<Bytes, Error>>;
 
     fn is_terminated(&self) -> bool;
 }
@@ -25,8 +26,8 @@ pub struct SourceStream<S> {
 }
 
 #[async_trait]
-impl<S: Stream<Item = Result<Vec<u8>, Error>> + Send + Unpin> Read for SourceStream<S> {
-    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
+impl<S: Stream<Item = Result<Bytes, Error>> + Send + Unpin> Read for SourceStream<S> {
+    async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         self.source.next().await
     }
 
@@ -52,7 +53,7 @@ pub struct SourceReader<R: AsyncRead> {
 #[cfg(tokio_io)]
 #[async_trait]
 impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
-    async fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
+    async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         let mut chunk = Vec::new();
         match self.reader.read_buf(&mut chunk).await {
             Ok(0) => {
@@ -131,10 +132,10 @@ impl<'a, S: Read + 'a> MapAccess<'a, S> {
         size_hint: Option<usize>,
     ) -> Result<MapAccess<'a, S>, Error> {
         decoder.expect_whitespace().await?;
-        decoder.expect_byte(MAP_BEGIN).await?;
+        decoder.expect_delimiter(MAP_BEGIN).await?;
         decoder.expect_whitespace().await?;
 
-        let done = decoder.maybe_byte(MAP_END).await?;
+        let done = decoder.maybe_delimiter(MAP_END).await?;
 
         Ok(MapAccess {
             decoder,
@@ -157,7 +158,7 @@ impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
         let key = K::from_stream(context, self.decoder).await?;
 
         self.decoder.expect_whitespace().await?;
-        self.decoder.expect_byte(COLON).await?;
+        self.decoder.expect_delimiter(COLON).await?;
         self.decoder.expect_whitespace().await?;
 
         Ok(Some(key))
@@ -167,10 +168,10 @@ impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
         let value = V::from_stream(context, self.decoder).await?;
         self.decoder.expect_whitespace().await?;
 
-        if self.decoder.maybe_byte(MAP_END).await? {
+        if self.decoder.maybe_delimiter(MAP_END).await? {
             self.done = true;
         } else {
-            self.decoder.expect_byte(COMMA).await?;
+            self.decoder.expect_delimiter(COMMA).await?;
         }
 
         Ok(value)
@@ -193,10 +194,10 @@ impl<'a, S: Read + 'a> SeqAccess<'a, S> {
         size_hint: Option<usize>,
     ) -> Result<SeqAccess<'a, S>, Error> {
         decoder.expect_whitespace().await?;
-        decoder.expect_byte(LIST_BEGIN).await?;
+        decoder.expect_delimiter(LIST_BEGIN).await?;
         decoder.expect_whitespace().await?;
 
-        let done = decoder.maybe_byte(LIST_END).await?;
+        let done = decoder.maybe_delimiter(LIST_END).await?;
 
         Ok(SeqAccess {
             decoder,
@@ -222,10 +223,10 @@ impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
         let value = T::from_stream(context, self.decoder).await?;
         self.decoder.expect_whitespace().await?;
 
-        if self.decoder.maybe_byte(LIST_END).await? {
+        if self.decoder.maybe_delimiter(LIST_END).await? {
             self.done = true;
         } else {
-            self.decoder.expect_byte(COMMA).await?;
+            self.decoder.expect_delimiter(COMMA).await?;
         }
 
         Ok(Some(value))
@@ -280,7 +281,7 @@ impl<S: Read> Decoder<S> {
     }
 
     async fn buffer_string(&mut self) -> Result<Vec<u8>, Error> {
-        self.expect_byte(QUOTE).await?;
+        self.expect_delimiter(QUOTE).await?;
 
         let mut i = 0;
         loop {
@@ -289,8 +290,8 @@ impl<S: Read> Decoder<S> {
             }
 
             if i < self.buffer.len()
-                && self.buffer[i] == QUOTE
-                && (i == 0 || self.buffer[i - 1] != ESCAPE)
+                && &self.buffer[i..i + 1] == QUOTE
+                && (i == 0 || &self.buffer[i - 1..i] != ESCAPE)
             {
                 break;
             } else if self.source.is_terminated() {
@@ -328,7 +329,7 @@ impl<S: Read> Decoder<S> {
     async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let mut i = 0;
         loop {
-            if self.buffer[i] == DECIMAL {
+            if self.buffer[i] == DECIMAL[0] {
                 return de::Decoder::decode_f64(self, visitor).await;
             } else if !self.numeric.contains(&self.buffer[i]) {
                 return de::Decoder::decode_i64(self, visitor).await;
@@ -345,7 +346,7 @@ impl<S: Read> Decoder<S> {
         }
     }
 
-    async fn expect_byte(&mut self, byte: u8) -> Result<(), Error> {
+    async fn expect_delimiter(&mut self, delimiter: &'static [u8]) -> Result<(), Error> {
         while self.buffer.is_empty() && !self.source.is_terminated() {
             self.buffer().await?;
         }
@@ -354,13 +355,13 @@ impl<S: Read> Decoder<S> {
             return Err(Error::unexpected_end());
         }
 
-        if self.buffer[0] == byte {
+        if &self.buffer[0..1] == delimiter {
             self.buffer.remove(0);
             Ok(())
         } else {
             Err(de::Error::invalid_value(
                 self.buffer[0] as char,
-                &format!("{}", (byte as char)),
+                &format!("{}", String::from_utf8(delimiter.to_vec()).unwrap()),
             ))
         }
     }
@@ -381,7 +382,7 @@ impl<S: Read> Decoder<S> {
         if self.buffer.is_empty() {
             Ok(())
         } else {
-            if self.buffer[0] == QUOTE {
+            if self.buffer.starts_with(QUOTE) {
                 self.parse_string().await?;
             } else if self.numeric.contains(&self.buffer[0]) {
                 self.parse_number::<f64>().await?;
@@ -395,14 +396,14 @@ impl<S: Read> Decoder<S> {
         }
     }
 
-    async fn maybe_byte(&mut self, byte: u8) -> Result<bool, Error> {
+    async fn maybe_delimiter(&mut self, delimiter: &'static [u8]) -> Result<bool, Error> {
         while self.buffer.is_empty() && !self.source.is_terminated() {
             self.buffer().await?;
         }
 
         if self.buffer.is_empty() {
             Ok(false)
-        } else if self.buffer[0] == byte {
+        } else if self.buffer.starts_with(delimiter) {
             self.buffer.remove(0);
             Ok(true)
         } else {
@@ -497,12 +498,12 @@ impl<S: Read> de::Decoder for Decoder<S> {
 
         if self.buffer.is_empty() {
             Err(Error::unexpected_end())
-        } else if self.buffer[0] == QUOTE {
+        } else if self.buffer.starts_with(QUOTE) {
             self.decode_string(visitor).await
-        } else if self.buffer[0] == MAP_BEGIN {
-            self.decode_map(visitor).await
-        } else if self.buffer[0] == LIST_BEGIN {
+        } else if self.buffer.starts_with(LIST_BEGIN) {
             self.decode_seq(visitor).await
+        } else if self.buffer.starts_with(MAP_BEGIN) {
+            self.decode_map(visitor).await
         } else if self.numeric.contains(&self.buffer[0]) {
             self.decode_number(visitor).await
         } else if self.buffer.len() >= 5 && self.buffer.starts_with(FALSE) {
@@ -674,18 +675,18 @@ impl<S: Read> From<S> for Decoder<S> {
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
-pub async fn decode<S: Stream<Item = Vec<u8>> + Send + Unpin, T: FromStream>(
+pub async fn decode<S: Stream<Item = Bytes> + Send + Unpin, T: FromStream>(
     context: T::Context,
     source: S,
 ) -> Result<T, Error> {
-    let source = source.map(Result::<Vec<u8>, Error>::Ok);
+    let source = source.map(Result::<Bytes, Error>::Ok);
     T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
 pub async fn try_decode<
     E: fmt::Display,
-    S: Stream<Item = Result<Vec<u8>, E>> + Send + Unpin,
+    S: Stream<Item = Result<Bytes, E>> + Send + Unpin,
     T: FromStream,
 >(
     context: T::Context,

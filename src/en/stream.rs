@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::task::{self, Poll};
 
+use bytes::Bytes;
 use destream::en::{self, IntoStream};
 use futures::ready;
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
@@ -33,7 +34,7 @@ impl<'en> JSONMapEntryStream<'en> {
 }
 
 impl<'en> Stream for JSONMapEntryStream<'en> {
-    type Item = Result<Vec<u8>, super::Error>;
+    type Item = Result<Bytes, super::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -41,7 +42,7 @@ impl<'en> Stream for JSONMapEntryStream<'en> {
         let result = if !this.key.is_terminated() {
             match ready!(this.key.as_mut().poll_next(cxt)) {
                 Some(result) => Some(result),
-                None => Some(Ok(vec![COLON])),
+                None => Some(Ok(Bytes::from_static(COLON))),
             }
         } else if !this.value.is_terminated() {
             match ready!(this.value.as_mut().poll_next(cxt)) {
@@ -64,7 +65,7 @@ impl<'en> FusedStream for JSONMapEntryStream<'en> {
 
 #[pin_project]
 struct JSONEncodingStream<
-    I: Stream<Item = Result<Vec<u8>, super::Error>>,
+    I: Stream<Item = Result<Bytes, super::Error>>,
     S: Stream<Item = Result<I, super::Error>>,
 > {
     #[pin]
@@ -75,16 +76,14 @@ struct JSONEncodingStream<
     started: bool,
     finished: bool,
 
-    start: u8,
-    end: u8,
+    start: &'static [u8],
+    end: &'static [u8],
 }
 
-impl<
-        I: Stream<Item = Result<Vec<u8>, super::Error>>,
-        S: Stream<Item = Result<I, super::Error>>,
-    > Stream for JSONEncodingStream<I, S>
+impl<I: Stream<Item = Result<Bytes, super::Error>>, S: Stream<Item = Result<I, super::Error>>>
+    Stream for JSONEncodingStream<I, S>
 {
-    type Item = Result<Vec<u8>, super::Error>;
+    type Item = Result<Bytes, super::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut task::Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -100,20 +99,20 @@ impl<
                         *this.next = Some(Box::pin(next));
 
                         if *this.started {
-                            break Some(Ok(vec![COMMA]));
+                            break Some(Ok(Bytes::from_static(COMMA)));
                         } else {
                             *this.started = true;
-                            break Some(Ok(vec![*this.start]));
+                            break Some(Ok(Bytes::from_static(*this.start)));
                         }
                     }
                     Some(Err(cause)) => break Some(Err(en::Error::custom(cause))),
                     None if !*this.started => {
                         *this.started = true;
-                        break Some(Ok(vec![*this.start]));
+                        break Some(Ok(Bytes::from_static(*this.start)));
                     }
                     None if !*this.finished => {
                         *this.finished = true;
-                        break Some(Ok(vec![*this.end]));
+                        break Some(Ok(Bytes::from_static(*this.end)));
                     }
                     None => break None,
                 },
@@ -122,10 +121,8 @@ impl<
     }
 }
 
-impl<
-        I: Stream<Item = Result<Vec<u8>, super::Error>>,
-        S: Stream<Item = Result<I, super::Error>>,
-    > FusedStream for JSONEncodingStream<I, S>
+impl<I: Stream<Item = Result<Bytes, super::Error>>, S: Stream<Item = Result<I, super::Error>>>
+    FusedStream for JSONEncodingStream<I, S>
 {
     fn is_terminated(&self) -> bool {
         self.finished
@@ -138,7 +135,7 @@ pub fn encode_list<
     S: Stream<Item = Result<I, super::Error>> + Send + Unpin + 'en,
 >(
     seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + 'en {
+) -> impl Stream<Item = Result<Bytes, super::Error>> + 'en {
     let source = seq
         .map(|result| result.and_then(|element| element.into_stream(Encoder)))
         .map_err(en::Error::custom);
@@ -160,7 +157,7 @@ pub fn encode_map<
     S: Stream<Item = Result<(K, V), super::Error>> + Send + Unpin + 'en,
 >(
     seq: S,
-) -> impl Stream<Item = Result<Vec<u8>, super::Error>> + Send + Unpin + 'en {
+) -> impl Stream<Item = Result<Bytes, super::Error>> + Send + Unpin + 'en {
     let source = seq
         .map(|result| result.and_then(|(key, value)| JSONMapEntryStream::new(key, value)))
         .map_err(en::Error::custom);
