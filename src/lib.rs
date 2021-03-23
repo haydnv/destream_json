@@ -146,6 +146,11 @@ mod tests {
         let expected = "\"string \\\"within\\\" string\"";
         test_encode_value(nested.clone(), expected).await;
         test_decode(expected, nested).await;
+
+        let terminal = "ends in a \\".to_string();
+        let expected = "\"ends in a \\\\\"";
+        test_encode_value(terminal.clone(), expected).await;
+        test_decode(expected, terminal).await;
     }
 
     #[tokio::test]

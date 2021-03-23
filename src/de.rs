@@ -284,21 +284,25 @@ impl<S: Read> Decoder<S> {
         self.expect_delimiter(QUOTE).await?;
 
         let mut i = 0;
+        let mut escaped = false;
         loop {
             while i >= self.buffer.len() && !self.source.is_terminated() {
                 self.buffer().await?;
             }
 
-            if i < self.buffer.len()
-                && &self.buffer[i..i + 1] == QUOTE
-                && (i == 0 || &self.buffer[i - 1..i] != ESCAPE)
-            {
+            if i < self.buffer.len() && &self.buffer[i..i + 1] == QUOTE && !escaped {
                 break;
             } else if self.source.is_terminated() {
                 return Err(Error::unexpected_end());
-            } else {
-                i += 1;
             }
+
+            if escaped {
+                escaped = false;
+            } else if self.buffer[i] == ESCAPE[0] {
+                escaped = true;
+            }
+
+            i += 1;
         }
 
         let mut s = Vec::with_capacity(i);
@@ -306,12 +310,6 @@ impl<S: Read> Decoder<S> {
         for byte in self.buffer.drain(0..i) {
             let as_slice = std::slice::from_ref(&byte);
             if escape {
-                if as_slice == QUOTE {
-                    // no-op
-                } else {
-                    s.extend_from_slice(ESCAPE);
-                }
-
                 s.put_u8(byte);
                 escape = false;
             } else if as_slice == ESCAPE {
@@ -320,7 +318,6 @@ impl<S: Read> Decoder<S> {
                 s.put_u8(byte);
             }
         }
-        println!("decoded string: {}", String::from_utf8(s.to_vec()).unwrap());
 
         self.buffer.remove(0); // process the end quote
         self.buffer.shrink_to_fit();

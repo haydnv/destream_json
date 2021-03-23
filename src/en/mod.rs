@@ -327,7 +327,8 @@ fn escape<T: fmt::Display>(value: T) -> Bytes {
     let as_str = value.to_string();
     let mut encoded = BytesMut::with_capacity(as_str.len());
     for byte in as_str.as_bytes() {
-        if std::slice::from_ref(byte) == QUOTE {
+        let as_slice = std::slice::from_ref(byte);
+        if as_slice == QUOTE || as_slice == ESCAPE {
             encoded.extend_from_slice(ESCAPE);
         }
 
