@@ -9,7 +9,7 @@ use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::constants::*;
@@ -44,13 +44,13 @@ impl<S: Stream> From<S> for SourceStream<S> {
     }
 }
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 pub struct SourceReader<R: AsyncRead> {
     reader: BufReader<R>,
     terminated: bool,
 }
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 #[async_trait]
 impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     async fn next(&mut self) -> Option<Result<Bytes, Error>> {
@@ -58,11 +58,11 @@ impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
         match self.reader.read_buf(&mut chunk).await {
             Ok(0) => {
                 self.terminated = true;
-                Some(Ok(chunk))
+                Some(Ok(chunk.into()))
             }
             Ok(size) => {
                 debug_assert_eq!(chunk.len(), size);
-                Some(Ok(chunk))
+                Some(Ok(chunk.into()))
             }
             Err(cause) => Some(Err(de::Error::custom(format!("io error: {}", cause)))),
         }
@@ -73,7 +73,7 @@ impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     }
 }
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 impl<R: AsyncRead> From<R> for SourceReader<R> {
     fn from(reader: R) -> Self {
         Self {
@@ -244,7 +244,7 @@ pub struct Decoder<S> {
     numeric: HashSet<u8>,
 }
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 impl<A: AsyncRead> Decoder<A>
 where
     SourceReader<A>: Read,
@@ -550,8 +550,8 @@ impl<S: Read> de::Decoder for Decoder<S> {
                 } else if self.buffer.starts_with(FALSE) {
                     self.decode_bool(visitor).await
                 } else {
-                    let s = String::from_utf8(self.buffer[0..5].to_vec())
-                        .map_err(Error::invalid_utf8)?;
+                    let i = Ord::min(self.buffer.len(), 5);
+                    let s = String::from_utf8(self.buffer[0..i].to_vec()).map_err(Error::invalid_utf8)?;
 
                     Err(de::Error::invalid_value(
                         s,
@@ -714,7 +714,7 @@ pub async fn try_decode<
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
 pub async fn read_from<S: AsyncReadExt + Send + Unpin, T: FromStream>(
     context: T::Context,

@@ -103,6 +103,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_primitives() {
+        test_decode("null", ()).await;
+
         test_decode("true", true).await;
         test_decode("false", false).await;
 
@@ -182,6 +184,9 @@ mod tests {
 
         test_decode("[1, 2, 3]", vec![1, 2, 3]).await;
         test_encode_value(&[1u8, 2u8, 3u8], "[1,2,3]").await;
+
+        test_decode("[1, 2, null]", (1, 2, ())).await;
+        test_encode_value((1u8, 2u8, ()), "[1,2,null]").await;
 
         test_encode_list(stream::iter(&[1u8, 2u8, 3u8]), "[1,2,3]").await;
         test_encode_list(
@@ -311,7 +316,7 @@ mod tests {
         assert_eq!(actual, TestSeq);
     }
 
-    #[cfg(tokio_io)]
+    #[cfg(feature = "tokio-io")]
     #[tokio::test]
     async fn test_async_read() {
         use std::io::Cursor;
