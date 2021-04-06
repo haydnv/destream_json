@@ -23,7 +23,7 @@ pub mod en;
 pub use de::{decode, try_decode};
 pub use en::{encode, encode_map, encode_seq};
 
-#[cfg(tokio_io)]
+#[cfg(feature = "tokio-io")]
 pub use de::read_from;
 
 #[cfg(test)]
