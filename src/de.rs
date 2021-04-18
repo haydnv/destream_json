@@ -551,7 +551,8 @@ impl<S: Read> de::Decoder for Decoder<S> {
                     self.decode_bool(visitor).await
                 } else {
                     let i = Ord::min(self.buffer.len(), 5);
-                    let s = String::from_utf8(self.buffer[0..i].to_vec()).map_err(Error::invalid_utf8)?;
+                    let s = String::from_utf8(self.buffer[0..i].to_vec())
+                        .map_err(Error::invalid_utf8)?;
 
                     Err(de::Error::invalid_value(
                         s,
