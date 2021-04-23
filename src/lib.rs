@@ -336,4 +336,34 @@ mod tests {
             ("hello".to_string(), 1i64, HashMap::<String, bool>::new())
         );
     }
+
+    #[cfg(feature = "tokio-io")]
+    #[tokio::test]
+    async fn test_async_write() {
+        use std::io;
+        use std::path::PathBuf;
+
+        use number_general::Number;
+        use tokio_util::io::StreamReader;
+
+        let mut value = HashMap::new();
+        value.insert("one".to_string(), Some(Number::from(1)));
+        value.insert("two".to_string(), None);
+        value.insert("three".to_string(), Some(Number::from(3.14)));
+
+        let path = PathBuf::from(".tmp");
+
+        let encoded = encode(&value).unwrap();
+        let mut reader =
+            StreamReader::new(encoded.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e)));
+
+        {
+            let mut file = tokio::fs::File::create(&path).await.unwrap();
+            tokio::io::copy(&mut reader, &mut file).await.unwrap();
+        }
+
+        let file = tokio::fs::File::open(path).await.unwrap();
+        let actual = read_from((), file).await.unwrap();
+        assert_eq!(value, actual);
+    }
 }
