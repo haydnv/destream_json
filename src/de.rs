@@ -237,6 +237,26 @@ impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     }
 }
 
+#[async_trait]
+impl<'a, S: Read + 'a, T: FromStream<Context = ()> + 'a> de::ArrayAccess<T> for SeqAccess<'a, S> {
+    type Error = Error;
+
+    async fn buffer(&mut self, buffer: &mut [T]) -> Result<usize, Self::Error> {
+        let mut i = 0;
+        let len = buffer.len();
+        while i < len {
+            if let Some(b) = de::SeqAccess::next_element(self, ()).await? {
+                buffer[i] = b;
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(i)
+    }
+}
+
 /// A structure that decodes Rust values from a JSON stream.
 pub struct Decoder<S> {
     source: S,
@@ -616,6 +636,11 @@ impl<S: Read> de::Decoder for Decoder<S> {
     async fn decode_f64<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let f = self.parse_number().await?;
         visitor.visit_f64(f)
+    }
+
+    async fn decode_array_bool<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_bool(access).await
     }
 
     async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {

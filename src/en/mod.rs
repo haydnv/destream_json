@@ -252,6 +252,24 @@ impl<'en> en::Encoder<'en> for Encoder {
     }
 
     #[inline]
+    fn encode_array_bool<
+        T: IntoIterator<Item = bool> + Send + 'en,
+        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+    >(
+        self,
+        chunks: S,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        <T as IntoIterator>::IntoIter: Send + 'en,
+    {
+        let sequence = chunks
+            .map_ok(|chunk| futures::stream::iter(chunk.into_iter().map(Ok)))
+            .try_flatten();
+
+        self.encode_seq_stream(sequence)
+    }
+
+    #[inline]
     fn encode_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         let mut chunk = BytesMut::with_capacity(v.as_bytes().len() + 2);
         chunk.extend_from_slice(QUOTE);
