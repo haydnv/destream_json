@@ -1,6 +1,6 @@
 [package]
 name = "destream_json"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["haydnv"]
 edition = "2018"
 license = "Apache-2.0"
@@ -28,7 +28,7 @@ pin-project = "1.0"
 tokio = { version = "1.2", features = ["io-util"], optional = true }
 
 [dev-dependencies]
-number-general = "0.3"
+number-general = "~0.3.7"
 tokio = { version = "1.5", features = ["fs", "macros"] }
 tokio-util = { version = "0.6", features = ["io"] }
 tokio-test = "0.4"
