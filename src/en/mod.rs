@@ -272,7 +272,6 @@ impl<'en> en::Encoder<'en> for Encoder {
         Ok(encode_fmt(v))
     }
 
-    #[inline]
     fn encode_array_bool<
         T: IntoIterator<Item = bool> + Send + Unpin + 'en,
         S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
