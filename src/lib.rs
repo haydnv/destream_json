@@ -12,9 +12,8 @@
 //! Deviations from the [JSON spec](https://www.json.org/):
 //!  - `destream_json` will not error out if asked to decode or encode a non-string key in a JSON
 //!    object (i.e., it supports a superset of the official JSON spec). This may cause issues
-//!    when using another JSON library to decode a stream encoded by `destream_json`. This can be
-//!    mitigated by simply not using non-string object keys, or adding an explicit check at encoding
-//!    time.
+//!    when using another JSON library to decode a stream encoded by `destream_json`. This behavior
+//!    can be altered by using only strings as keys, or adding an explicit check at encoding time.
 
 pub use de::{decode, try_decode};
 pub use en::{encode, encode_map, encode_seq};

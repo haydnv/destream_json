@@ -651,6 +651,78 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor.visit_array_bool(access).await
     }
 
+    async fn decode_array_i16<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_i16(access).await
+    }
+
+    async fn decode_array_i32<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_i32(access).await
+    }
+
+    async fn decode_array_i64<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_i64(access).await
+    }
+
+    async fn decode_array_u8<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_u8(access).await
+    }
+
+    async fn decode_array_u16<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_u16(access).await
+    }
+
+    async fn decode_array_u32<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_u32(access).await
+    }
+
+    async fn decode_array_u64<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_u64(access).await
+    }
+
+    async fn decode_array_f32<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_f32(access).await
+    }
+
+    async fn decode_array_f64<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_f64(access).await
+    }
+
     async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         self.expect_whitespace().await?;
 
