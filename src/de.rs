@@ -643,6 +643,14 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor.visit_array_bool(access).await
     }
 
+    async fn decode_array_i8<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let access = SeqAccess::new(self, None).await?;
+        visitor.visit_array_bool(access).await
+    }
+
     async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         self.expect_whitespace().await?;
 

@@ -16,13 +16,6 @@
 //!    mitigated by simply not using non-string object keys, or adding an explicit check at encoding
 //!    time.
 
-mod constants;
-pub mod de;
-pub mod en;
-
-#[cfg(feature = "value")]
-mod value;
-
 pub use de::{decode, try_decode};
 pub use en::{encode, encode_map, encode_seq};
 
@@ -31,6 +24,13 @@ pub use value::Value;
 
 #[cfg(feature = "tokio-io")]
 pub use de::read_from;
+
+mod constants;
+pub mod de;
+pub mod en;
+
+#[cfg(feature = "value")]
+mod value;
 
 #[cfg(test)]
 mod tests {
