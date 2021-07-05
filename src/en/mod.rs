@@ -8,7 +8,7 @@ use std::pin::Pin;
 use bytes::{BufMut, Bytes, BytesMut};
 use destream::en::{self, IntoStream};
 use futures::future;
-use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt};
 
 use crate::constants::*;
 
@@ -194,7 +194,7 @@ impl Encoder {
         'en,
         E: IntoStream<'en> + 'en,
         T: IntoIterator<Item = E> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -203,8 +203,8 @@ impl Encoder {
         <T as IntoIterator>::IntoIter: Send + Unpin + 'en,
     {
         let sequence = chunks
-            .map_ok(|chunk| futures::stream::iter(chunk.into_iter().map(Ok)))
-            .try_flatten();
+            .map(|chunk| futures::stream::iter(chunk.into_iter()))
+            .flatten();
 
         en::Encoder::encode_seq_stream(self, sequence)
     }
@@ -274,7 +274,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_bool<
         T: IntoIterator<Item = bool> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -287,7 +287,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_i8<
         T: IntoIterator<Item = i8> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -300,7 +300,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_i16<
         T: IntoIterator<Item = i16> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -313,7 +313,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_i32<
         T: IntoIterator<Item = i32> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -326,7 +326,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_i64<
         T: IntoIterator<Item = i64> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -339,7 +339,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_u8<
         T: IntoIterator<Item = u8> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -352,7 +352,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_u16<
         T: IntoIterator<Item = u16> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -365,7 +365,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_u32<
         T: IntoIterator<Item = u32> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -378,7 +378,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_u64<
         T: IntoIterator<Item = u64> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -391,7 +391,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_f32<
         T: IntoIterator<Item = f32> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -404,7 +404,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     fn encode_array_f64<
         T: IntoIterator<Item = f64> + Send + Unpin + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = T> + Send + Unpin + 'en,
     >(
         self,
         chunks: S,
@@ -456,7 +456,7 @@ impl<'en> en::Encoder<'en> for Encoder {
     fn encode_map_stream<
         K: IntoStream<'en> + 'en,
         V: IntoStream<'en> + 'en,
-        S: Stream<Item = Result<(K, V), Self::Error>> + Send + Unpin + 'en,
+        S: Stream<Item = (K, V)> + Send + Unpin + 'en,
     >(
         self,
         map: S,
@@ -470,10 +470,7 @@ impl<'en> en::Encoder<'en> for Encoder {
     }
 
     #[inline]
-    fn encode_seq_stream<
-        T: IntoStream<'en> + 'en,
-        S: Stream<Item = Result<T, Self::Error>> + Send + Unpin + 'en,
-    >(
+    fn encode_seq_stream<T: IntoStream<'en> + 'en, S: Stream<Item = T> + Send + Unpin + 'en>(
         self,
         seq: S,
     ) -> Result<Self::Ok, Self::Error> {
@@ -530,37 +527,12 @@ pub fn encode_map<
 >(
     seq: S,
 ) -> impl Stream<Item = Result<Bytes, Error>> + Send + Unpin + 'en {
-    stream::encode_map(seq.map(Result::<(K, V), Error>::Ok))
-}
-
-/// Given a stream of encodable key-value pairs, return a streaming JSON list.
-pub fn try_encode_map<
-    'en,
-    E: fmt::Display + 'en,
-    K: IntoStream<'en> + 'en,
-    V: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<(K, V), E>> + Send + Unpin + 'en,
->(
-    seq: S,
-) -> impl Stream<Item = Result<Bytes, Error>> + Send + Unpin + 'en {
-    Box::pin(stream::encode_map(seq.map_err(en::Error::custom)))
+    stream::encode_map(seq)
 }
 
 /// Given a stream of encodable elements, return a streaming JSON list.
 pub fn encode_seq<'en, T: IntoStream<'en> + 'en, S: Stream<Item = T> + Send + Unpin + 'en>(
     seq: S,
 ) -> impl Stream<Item = Result<Bytes, Error>> + Send + Unpin + 'en {
-    stream::encode_list(seq.map(Result::<T, Error>::Ok))
-}
-
-/// Given a stream of encodable elements, return a streaming JSON list.
-pub fn try_encode_seq<
-    'en,
-    E: fmt::Display + 'en,
-    T: IntoStream<'en> + 'en,
-    S: Stream<Item = Result<T, E>> + Send + Unpin + 'en,
->(
-    seq: S,
-) -> impl Stream<Item = Result<Bytes, Error>> + Send + Unpin + 'en {
-    stream::encode_list(seq.map_err(en::Error::custom))
+    stream::encode_list(seq)
 }

@@ -47,6 +47,15 @@ mod tests {
 
     use super::de::*;
     use super::en::*;
+    use destream::Encoder;
+
+    struct Error;
+
+    impl<'en> IntoStream<'en> for Error {
+        fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+            "an error!".into_stream(encoder)
+        }
+    }
 
     async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(
         encoded: &str,
@@ -56,6 +65,7 @@ mod tests {
             let source = stream::iter(encoded.as_bytes().into_iter().cloned())
                 .chunks(i)
                 .map(Bytes::from);
+
             let actual: T = decode((), source).await.unwrap();
             assert_eq!(expected, actual)
         }
@@ -236,7 +246,7 @@ mod tests {
                 &'en self,
                 encoder: E,
             ) -> Result<E::Ok, E::Error> {
-                encoder.encode_array_bool(stream::once(future::ready(Ok(self.data.to_vec()))))
+                encoder.encode_array_bool(stream::once(future::ready(self.data.to_vec())))
             }
         }
 

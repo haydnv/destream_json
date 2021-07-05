@@ -4,7 +4,7 @@ use std::task::{self, Poll};
 use bytes::Bytes;
 use destream::en::{self, IntoStream};
 use futures::ready;
-use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
+use futures::stream::{Fuse, FusedStream, Stream, StreamExt};
 use pin_project::pin_project;
 
 use crate::constants::*;
@@ -129,16 +129,10 @@ impl<I: Stream<Item = Result<Bytes, super::Error>>, S: Stream<Item = Result<I, s
     }
 }
 
-pub fn encode_list<
-    'en,
-    I: IntoStream<'en>,
-    S: Stream<Item = Result<I, super::Error>> + Send + Unpin + 'en,
->(
+pub fn encode_list<'en, I: IntoStream<'en>, S: Stream<Item = I> + Send + Unpin + 'en>(
     seq: S,
 ) -> impl Stream<Item = Result<Bytes, super::Error>> + 'en {
-    let source = seq
-        .map(|result| result.and_then(|element| element.into_stream(Encoder)))
-        .map_err(en::Error::custom);
+    let source = seq.map(|item| item.into_stream(Encoder));
 
     JSONEncodingStream {
         source: source.fuse(),
@@ -154,13 +148,11 @@ pub fn encode_map<
     'en,
     K: IntoStream<'en>,
     V: IntoStream<'en>,
-    S: Stream<Item = Result<(K, V), super::Error>> + Send + Unpin + 'en,
+    S: Stream<Item = (K, V)> + Send + Unpin + 'en,
 >(
-    seq: S,
+    source: S,
 ) -> impl Stream<Item = Result<Bytes, super::Error>> + Send + Unpin + 'en {
-    let source = seq
-        .map(|result| result.and_then(|(key, value)| JSONMapEntryStream::new(key, value)))
-        .map_err(en::Error::custom);
+    let source = source.map(|(key, value)| JSONMapEntryStream::new(key, value));
 
     JSONEncodingStream {
         source: source.fuse(),
