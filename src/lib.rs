@@ -2,10 +2,11 @@
 //!
 //! Example:
 //! ```
+//! # use futures::StreamExt;
 //! # use futures::executor::block_on;
 //! let expected = ("one".to_string(), 2.0, vec![3, 4]);
 //! let stream = destream_json::encode(&expected).unwrap();
-//! let actual = block_on(destream_json::try_decode((), stream)).unwrap();
+//! let actual = block_on(destream_json::decode((), stream.map(|r| r.unwrap()))).unwrap();
 //! assert_eq!(expected, actual);
 //! ```
 //!
@@ -15,7 +16,7 @@
 //!    when using another JSON library to decode a stream encoded by `destream_json`. This behavior
 //!    can be altered by using only strings as keys, or adding an explicit check at encoding time.
 
-pub use de::{decode, try_decode};
+pub use de::decode;
 pub use en::{encode, encode_map, encode_seq};
 
 #[cfg(feature = "value")]
@@ -41,13 +42,13 @@ mod tests {
     use async_trait::async_trait;
     use bytes::Bytes;
     use destream::de::{self, ArrayAccess, FromStream, Visitor};
-    use destream::en::IntoStream;
+    use destream::en::{Encoder, IntoStream};
     use futures::future;
     use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
     use super::de::*;
     use super::en::*;
-    use destream::Encoder;
+    use destream::{MapAccess, SeqAccess};
 
     struct Error;
 
@@ -61,7 +62,7 @@ mod tests {
         encoded: &str,
         expected: T,
     ) {
-        for i in 1..encoded.len() {
+        for i in (1..encoded.len()).rev() {
             let source = stream::iter(encoded.as_bytes().into_iter().cloned())
                 .chunks(i)
                 .map(Bytes::from);
@@ -188,7 +189,7 @@ mod tests {
         let utf8_str = "मकर संक्रान्ति";
 
         let encoded = encode(Bytes::from(utf8_str.as_bytes())).unwrap();
-        let decoded: Bytes = try_decode((), encoded).await.unwrap();
+        let decoded: Bytes = decode((), encoded.map(|r| r.unwrap())).await.unwrap();
 
         assert_eq!(utf8_str, std::str::from_utf8(&decoded).unwrap());
     }
@@ -342,6 +343,37 @@ mod tests {
         test_encode_map(stream::iter(map), "{-1:true,2:null}").await;
     }
 
+    #[cfg(feature = "value")]
+    #[tokio::test]
+    async fn test_generic_value() {
+        use crate::Value;
+        use std::iter;
+
+        let expected = Value::List(vec![
+            Value::List(vec![
+                Value::String("baz".to_string()),
+                Value::Map(HashMap::from_iter(iter::once((
+                    "spam".to_string(),
+                    Value::Map(HashMap::new()),
+                )))),
+                Value::Number(100u64.into()),
+            ]),
+            Value::List(vec![
+                Value::String("foo".to_string()),
+                Value::Map(HashMap::from_iter(iter::once((
+                    "bar".to_string(),
+                    Value::List(vec![]),
+                )))),
+            ]),
+        ]);
+
+        test_decode(
+            "[[\"baz\", {\"spam\": {}}, 100], [\"foo\", {\"bar\": []}]]",
+            expected,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn test_err() {
         #[derive(Debug, Default, Eq, PartialEq)]
@@ -394,6 +426,8 @@ mod tests {
                 assert!(access.next_element::<String>(()).await.is_err());
                 assert!(access.next_element::<Vec<i64>>(()).await.is_err());
                 assert!(access.next_element::<i64>(()).await.is_ok());
+                assert!(access.next_element::<i64>(()).await.is_ok());
+                assert!(access.next_element::<i64>(()).await.is_ok());
 
                 Ok(T::default())
             }
@@ -414,6 +448,161 @@ mod tests {
 
         let actual: TestSeq = decode((), source).await.unwrap();
         assert_eq!(actual, TestSeq);
+    }
+
+    #[cfg(feature = "value")]
+    #[tokio::test]
+    async fn test_complex_list_with_err() {
+        use crate::Value;
+        use futures::TryFutureExt;
+
+        #[derive(Eq, PartialEq)]
+        struct Class {
+            name: String,
+        }
+
+        #[async_trait]
+        impl FromStream for Class {
+            type Context = ();
+
+            async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+                decoder.decode_any(ClassVisitor).await
+            }
+        }
+
+        impl fmt::Debug for Class {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "class: {}", self.name)
+            }
+        }
+
+        struct ClassVisitor;
+
+        #[async_trait]
+        impl Visitor for ClassVisitor {
+            type Value = Class;
+
+            fn expecting() -> &'static str {
+                "a Class"
+            }
+
+            async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let name = map.next_key(()).await?;
+                let name = name.unwrap();
+
+                if let Ok(list) = map
+                    .next_value::<Vec<Value>>(())
+                    .inspect_err(|err| println!("list error is {}", err))
+                    .await
+                {
+                    if list.is_empty() {
+                        Ok(Class { name })
+                    } else {
+                        Err(de::Error::invalid_value("list", "empty list"))
+                    }
+                } else if let Ok(map) = map
+                    .next_value::<HashMap<String, Value>>(())
+                    .inspect_err(|err| println!("map error is {}", err))
+                    .await
+                {
+                    if map.is_empty() {
+                        Ok(Class { name })
+                    } else {
+                        Err(de::Error::invalid_value("map", "empty map"))
+                    }
+                } else {
+                    Err(de::Error::invalid_length(0, Self::expecting()))
+                }
+            }
+        }
+
+        #[derive(Eq, PartialEq)]
+        struct Entry {
+            name: String,
+            class: Class,
+            len: Option<usize>,
+        }
+
+        impl Entry {
+            fn new<C: fmt::Display, N: fmt::Display>(name: N, class: C) -> Self {
+                Self {
+                    name: name.to_string(),
+                    class: Class {
+                        name: class.to_string(),
+                    },
+                    len: None,
+                }
+            }
+
+            fn with_len<C: fmt::Display, N: fmt::Display>(name: N, class: C, len: usize) -> Self {
+                Self {
+                    name: name.to_string(),
+                    class: Class {
+                        name: class.to_string(),
+                    },
+                    len: Some(len),
+                }
+            }
+        }
+
+        #[async_trait]
+        impl FromStream for Entry {
+            type Context = ();
+
+            async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+                decoder.decode_seq(EntryVisitor).await
+            }
+        }
+
+        impl fmt::Debug for Entry {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "entry: {} {} {:?}", self.name, self.class.name, self.len)
+            }
+        }
+
+        struct EntryVisitor;
+
+        #[async_trait]
+        impl Visitor for EntryVisitor {
+            type Value = Entry;
+
+            fn expecting() -> &'static str {
+                "an Entry"
+            }
+
+            async fn visit_seq<A: SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let name = seq.next_element(()).await?;
+                let name = name.unwrap();
+
+                let class = seq.next_element(()).await?;
+                let class = class.unwrap();
+
+                let len = seq.next_element(()).await?;
+
+                Ok(Entry { name, class, len })
+            }
+        }
+
+        let expected = Class {
+            name: "one".to_string(),
+        };
+        test_decode("{\"one\": {}}", expected).await;
+
+        let expected = Entry::new("two", "class two");
+        test_decode("[\"two\", {\"class two\": {}}]", expected).await;
+
+        let expected = vec![Entry::with_len("one", "class one", 1)];
+        test_decode("[[\"one\", {\"class one\": {}}, 1]]", expected).await;
+
+        let expected = vec![
+            Entry::with_len("one", "class one", 1),
+            Entry::new("two", "class two"),
+        ];
+        test_decode(
+            "[[\"one\", {\"class one\": {}}, 1], [\"two\", {\"class two\": {}}]]",
+            expected,
+        )
+        .await
     }
 
     #[cfg(feature = "tokio-io")]

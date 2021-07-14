@@ -1,10 +1,10 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
-use destream::en::IntoStream;
-use destream::{Encoder, ToStream};
+use destream::en::{Encoder, IntoStream, ToStream};
 use number_general::Number;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -143,6 +143,19 @@ impl<'en> ToStream<'en> for Value {
             Self::Map(map) => map.to_stream(encoder),
             Self::Number(n) => n.to_stream(encoder),
             Self::String(s) => s.to_stream(encoder),
+        }
+    }
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Bytes(bytes) => fmt::Debug::fmt(bytes, f),
+            Self::List(list) => fmt::Debug::fmt(list, f),
+            Self::None => f.write_str("None"),
+            Self::Map(map) => fmt::Debug::fmt(map, f),
+            Self::Number(n) => fmt::Debug::fmt(n, f),
+            Self::String(s) => fmt::Debug::fmt(s, f),
         }
     }
 }

@@ -7,12 +7,14 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
-use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
+use futures::stream::{Fuse, FusedStream, Stream, StreamExt};
 
 #[cfg(feature = "tokio-io")]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::constants::*;
+
+const SNIPPET_LEN: usize = 10;
 
 #[async_trait]
 pub trait Read: Send + Unpin {
@@ -132,6 +134,7 @@ impl<'a, S: Read + 'a> MapAccess<'a, S> {
         size_hint: Option<usize>,
     ) -> Result<MapAccess<'a, S>, Error> {
         decoder.expect_whitespace().await?;
+
         decoder.expect_delimiter(MAP_BEGIN).await?;
         decoder.expect_whitespace().await?;
 
@@ -165,7 +168,14 @@ impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
     }
 
     async fn next_value<V: FromStream>(&mut self, context: V::Context) -> Result<V, Error> {
+        if self.done {
+            return Err(de::Error::custom(
+                "called MapAccess::next_value but the map has already ended",
+            ));
+        }
+
         let value = V::from_stream(context, self.decoder).await?;
+
         self.decoder.expect_whitespace().await?;
 
         if self.decoder.maybe_delimiter(MAP_END).await? {
@@ -278,6 +288,13 @@ where
     }
 }
 
+impl<S> Decoder<S> {
+    fn contents(&self, max_len: usize) -> Result<String, Error> {
+        let len = Ord::min(self.buffer.len(), max_len);
+        String::from_utf8(self.buffer[..len].to_vec()).map_err(|cause| Error::invalid_utf8(cause))
+    }
+}
+
 impl<S: Stream> Decoder<SourceStream<S>>
 where
     SourceStream<S>: Read,
@@ -288,6 +305,10 @@ where
             buffer: Vec::new(),
             numeric: NUMERIC.iter().cloned().collect(),
         }
+    }
+
+    pub fn is_terminated(&self) -> bool {
+        self.source.is_terminated()
     }
 }
 
@@ -396,10 +417,11 @@ impl<S: Read> Decoder<S> {
             self.buffer.remove(0);
             Ok(())
         } else {
-            Err(de::Error::invalid_value(
-                self.buffer[0] as char,
-                &format!("{}", String::from_utf8(delimiter.to_vec()).unwrap()),
-            ))
+            let contents = self.contents(SNIPPET_LEN)?;
+            Err(de::Error::custom(format!(
+                "unexpected delimiter {}, expected {} at `{}`...",
+                self.buffer[0] as char, delimiter[0] as char, contents
+            )))
         }
     }
 
@@ -803,20 +825,20 @@ pub async fn decode<S: Stream<Item = Bytes> + Send + Unpin, T: FromStream>(
     source: S,
 ) -> Result<T, Error> {
     let source = source.map(Result::<Bytes, Error>::Ok);
-    T::from_stream(context, &mut Decoder::from(SourceStream::from(source))).await
-}
+    let mut decoder = Decoder::from(SourceStream::from(source));
 
-/// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
-pub async fn try_decode<
-    E: fmt::Display,
-    S: Stream<Item = Result<Bytes, E>> + Send + Unpin,
-    T: FromStream,
->(
-    context: T::Context,
-    source: S,
-) -> Result<T, Error> {
-    let mut decoder = Decoder::from_stream(source.map_err(|e| de::Error::custom(e)));
-    T::from_stream(context, &mut decoder).await
+    let decoded = T::from_stream(context, &mut decoder).await?;
+    decoder.expect_whitespace().await?;
+
+    if decoder.is_terminated() {
+        Ok(decoded)
+    } else {
+        let buffer = decoder.contents(SNIPPET_LEN)?;
+        Err(de::Error::custom(format!(
+            "expected end of stream, found `{}...`",
+            buffer
+        )))
+    }
 }
 
 /// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
