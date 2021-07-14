@@ -7,7 +7,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
-use futures::stream::{Fuse, FusedStream, Stream, StreamExt};
+use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
 
 #[cfg(feature = "tokio-io")]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
@@ -837,6 +837,30 @@ pub async fn decode<S: Stream<Item = Bytes> + Send + Unpin, T: FromStream>(
         Err(de::Error::custom(format!(
             "expected end of stream, found `{}...`",
             buffer
+        )))
+    }
+}
+
+/// Decode the given JSON-encoded stream of bytes into an instance of `T` using the given context.
+pub async fn try_decode<
+    E: fmt::Display,
+    S: Stream<Item = Result<Bytes, E>> + Send + Unpin,
+    T: FromStream,
+>(
+    context: T::Context,
+    source: S,
+) -> Result<T, Error> {
+    let mut decoder = Decoder::from_stream(source.map_err(|e| de::Error::custom(e)));
+    let decoded = T::from_stream(context, &mut decoder).await?;
+    decoder.expect_whitespace().await?;
+
+    if decoder.is_terminated() {
+        Ok(decoded)
+    } else {
+        let snippet = decoder.contents(SNIPPET_LEN)?;
+        Err(de::Error::custom(format!(
+            "expected end of stream, found `{}...`",
+            snippet
         )))
     }
 }

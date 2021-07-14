@@ -6,7 +6,7 @@
 //! # use futures::executor::block_on;
 //! let expected = ("one".to_string(), 2.0, vec![3, 4]);
 //! let stream = destream_json::encode(&expected).unwrap();
-//! let actual = block_on(destream_json::decode((), stream.map(|r| r.unwrap()))).unwrap();
+//! let actual = block_on(destream_json::try_decode((), stream)).unwrap();
 //! assert_eq!(expected, actual);
 //! ```
 //!
@@ -16,7 +16,7 @@
 //!    when using another JSON library to decode a stream encoded by `destream_json`. This behavior
 //!    can be altered by using only strings as keys, or adding an explicit check at encoding time.
 
-pub use de::decode;
+pub use de::{decode, try_decode};
 pub use en::{encode, encode_map, encode_seq};
 
 #[cfg(feature = "value")]
@@ -189,7 +189,7 @@ mod tests {
         let utf8_str = "मकर संक्रान्ति";
 
         let encoded = encode(Bytes::from(utf8_str.as_bytes())).unwrap();
-        let decoded: Bytes = decode((), encoded.map(|r| r.unwrap())).await.unwrap();
+        let decoded: Bytes = try_decode((), encoded).await.unwrap();
 
         assert_eq!(utf8_str, std::str::from_utf8(&decoded).unwrap());
     }
