@@ -1,6 +1,6 @@
 [package]
 name = "destream_json"
-version = "0.8.1"
+version = "0.8.2"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 license = "Apache-2.0"
@@ -25,10 +25,10 @@ destream = "0.5"
 futures = "0.3"
 number-general = { version = "0.3", optional = true }
 pin-project = "1.0"
-tokio = { version = "1.2", features = ["io-util"], optional = true }
+tokio = { version = "1.9", features = ["io-util"], optional = true }
 
 [dev-dependencies]
 number-general = "~0.3.9"
-tokio = { version = "1.8", features = ["fs", "macros"] }
+tokio = { version = "1.9", features = ["fs", "macros"] }
 tokio-util = { version = "0.6", features = ["io"] }
 tokio-test = "0.4"

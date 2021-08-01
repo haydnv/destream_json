@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::constants::*;
 
-const SNIPPET_LEN: usize = 10;
+const SNIPPET_LEN: usize = 50;
 
 #[async_trait]
 pub trait Read: Send + Unpin {
@@ -473,29 +473,29 @@ impl<S: Read> Decoder<S> {
     async fn parse_bool(&mut self) -> Result<bool, Error> {
         self.expect_whitespace().await?;
 
-        while self.buffer.len() < 4 && !self.source.is_terminated() {
+        while self.buffer.len() < TRUE.len() && !self.source.is_terminated() {
             self.buffer().await?;
         }
 
         if self.buffer.is_empty() {
             return Err(Error::unexpected_end());
         } else if self.buffer.starts_with(TRUE) {
-            self.buffer.drain(0..4);
+            self.buffer.drain(0..TRUE.len());
             return Ok(true);
         }
 
-        while self.buffer.len() < 5 && !self.source.is_terminated() {
+        while self.buffer.len() < FALSE.len() && !self.source.is_terminated() {
             self.buffer().await?;
         }
 
         if self.buffer.is_empty() {
             return Err(Error::unexpected_end());
         } else if self.buffer.starts_with(FALSE) {
-            self.buffer.drain(0..5);
+            self.buffer.drain(0..FALSE.len());
             return Ok(false);
         }
 
-        let i = Ord::min(self.buffer.len(), 5);
+        let i = Ord::min(self.buffer.len(), SNIPPET_LEN);
         let unknown = String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
         Err(de::Error::invalid_value(unknown, &"a boolean"))
     }
@@ -527,7 +527,7 @@ impl<S: Read> Decoder<S> {
     async fn parse_unit(&mut self) -> Result<(), Error> {
         self.expect_whitespace().await?;
 
-        while self.buffer.len() < 4 && !self.source.is_terminated() {
+        while self.buffer.len() < NULL.len() && !self.source.is_terminated() {
             self.buffer().await?;
         }
 
@@ -535,7 +535,7 @@ impl<S: Read> Decoder<S> {
             self.buffer.drain(..NULL.len());
             Ok(())
         } else {
-            let i = Ord::min(self.buffer.len(), 5);
+            let i = Ord::min(self.buffer.len(), SNIPPET_LEN);
             let as_str =
                 String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
 
@@ -565,14 +565,14 @@ impl<S: Read> de::Decoder for Decoder<S> {
             self.decode_map(visitor).await
         } else if self.numeric.contains(&self.buffer[0]) {
             self.decode_number(visitor).await
-        } else if self.buffer.len() >= 5 && self.buffer.starts_with(FALSE) {
+        } else if self.buffer.len() >= FALSE.len() && self.buffer.starts_with(FALSE) {
             self.decode_bool(visitor).await
-        } else if self.buffer.len() >= 4 && self.buffer.starts_with(TRUE) {
+        } else if self.buffer.len() >= TRUE.len() && self.buffer.starts_with(TRUE) {
             self.decode_bool(visitor).await
-        } else if self.buffer.len() >= 4 && self.buffer.starts_with(NULL) {
+        } else if self.buffer.len() >= NULL.len() && self.buffer.starts_with(NULL) {
             self.decode_option(visitor).await
         } else {
-            while self.buffer.len() < 4 && !self.source.is_terminated() {
+            while self.buffer.len() < TRUE.len() && !self.source.is_terminated() {
                 self.buffer().await?;
             }
 
@@ -583,7 +583,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
             } else if self.buffer.starts_with(NULL) {
                 self.decode_option(visitor).await
             } else {
-                while self.buffer.len() < 5 && !self.source.is_terminated() {
+                while self.buffer.len() < FALSE.len() && !self.source.is_terminated() {
                     self.buffer().await?;
                 }
 
@@ -592,7 +592,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
                 } else if self.buffer.starts_with(FALSE) {
                     self.decode_bool(visitor).await
                 } else {
-                    let i = Ord::min(self.buffer.len(), 5);
+                    let i = Ord::min(self.buffer.len(), SNIPPET_LEN);
                     let s = String::from_utf8(self.buffer[0..i].to_vec())
                         .map_err(Error::invalid_utf8)?;
 
@@ -761,12 +761,12 @@ impl<S: Read> de::Decoder for Decoder<S> {
     async fn decode_option<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         self.expect_whitespace().await?;
 
-        while self.buffer.len() < 4 && !self.source.is_terminated() {
+        while self.buffer.len() < NULL.len() && !self.source.is_terminated() {
             self.buffer().await?;
         }
 
         if self.buffer.starts_with(NULL) {
-            self.buffer.drain(0..4);
+            self.buffer.drain(0..NULL.len());
             visitor.visit_none()
         } else {
             visitor.visit_some(self).await

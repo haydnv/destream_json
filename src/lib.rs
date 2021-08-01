@@ -48,7 +48,6 @@ mod tests {
 
     use super::de::*;
     use super::en::*;
-    use destream::{MapAccess, SeqAccess};
 
     struct Error;
 
@@ -486,7 +485,10 @@ mod tests {
                 "a Class"
             }
 
-            async fn visit_map<A: MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            async fn visit_map<A: destream::de::MapAccess>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
                 let name = map.next_key(()).await?;
                 let name = name.unwrap();
 
@@ -570,7 +572,10 @@ mod tests {
                 "an Entry"
             }
 
-            async fn visit_seq<A: SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            async fn visit_seq<A: destream::de::SeqAccess>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
                 let name = seq.next_element(()).await?;
                 let name = name.unwrap();
 
