@@ -1,6 +1,6 @@
 [package]
 name = "destream_json"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["haydn@tinychain.net"]
 edition = "2018"
 license = "Apache-2.0"

@@ -264,12 +264,26 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     #[inline]
     fn encode_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        Ok(encode_fmt(v))
+        if v == f32::NAN || v == f32::INFINITY || v == f32::NEG_INFINITY {
+            Err(en::Error::custom(format!(
+                "JSON encoding does not support floating-point value {}",
+                v
+            )))
+        } else {
+            Ok(encode_fmt(v))
+        }
     }
 
     #[inline]
     fn encode_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        Ok(encode_fmt(v))
+        if v == f64::NAN || v == f64::INFINITY || v == f64::NEG_INFINITY {
+            Err(en::Error::custom(format!(
+                "JSON encoding does not support floating-point value {}",
+                v
+            )))
+        } else {
+            Ok(encode_fmt(v))
+        }
     }
 
     fn encode_array_bool<
