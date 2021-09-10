@@ -255,11 +255,19 @@ impl<'a, S: Read + 'a, T: FromStream<Context = ()> + 'a> de::ArrayAccess<T> for 
         let mut i = 0;
         let len = buffer.len();
         while i < len {
-            if let Some(b) = de::SeqAccess::next_element(self, ()).await? {
-                buffer[i] = b;
-                i += 1;
-            } else {
-                break;
+            match de::SeqAccess::next_element(self, ()).await {
+                Ok(Some(b)) => {
+                    buffer[i] = b;
+                    i += 1;
+                }
+                Ok(None) => break,
+                Err(cause) => {
+                    let message = match self.decoder.contents(SNIPPET_LEN) {
+                        Ok(snippet) => format!("array decode error: {} at {}...", cause, snippet),
+                        Err(_) => format!("array decode error: {}", cause),
+                    };
+                    return Err(de::Error::custom(message));
+                }
             }
         }
 
