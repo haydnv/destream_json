@@ -146,6 +146,7 @@ mod tests {
         test_encode_value(53i32, "53").await;
         test_encode_value((-2i64).pow(63), &(-2i64).pow(63).to_string()).await;
 
+        test_decode("1e-6", 1e-6).await;
         test_decode("2e2", 2e2_f32).await;
         test_decode("-2e-3", -2e-3_f64).await;
         test_decode("3.14", 3.14_f32).await;
@@ -195,9 +196,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_array() {
-        #[derive(Eq, PartialEq)]
+        #[derive(PartialEq)]
         struct TestArray {
-            data: Vec<bool>,
+            data: Vec<f64>,
         }
 
         struct TestVisitor;
@@ -210,12 +211,12 @@ mod tests {
                 "a TestArray"
             }
 
-            async fn visit_array_bool<A: ArrayAccess<bool>>(
+            async fn visit_array_f64<A: ArrayAccess<f64>>(
                 self,
                 mut array: A,
             ) -> Result<Self::Value, A::Error> {
                 let mut data = Vec::with_capacity(3);
-                let mut buffer = [false; 100];
+                let mut buffer = [0.; 100];
                 loop {
                     let num_items = array.buffer(&mut buffer).await?;
                     if num_items > 0 {
@@ -237,7 +238,7 @@ mod tests {
                 _: (),
                 decoder: &mut D,
             ) -> Result<Self, D::Error> {
-                decoder.decode_array_bool(TestVisitor).await
+                decoder.decode_array_f64(TestVisitor).await
             }
         }
 
@@ -246,7 +247,7 @@ mod tests {
                 &'en self,
                 encoder: E,
             ) -> Result<E::Ok, E::Error> {
-                encoder.encode_array_bool(stream::once(future::ready(self.data.to_vec())))
+                encoder.encode_array_f64(stream::once(future::ready(self.data.to_vec())))
             }
         }
 
@@ -257,7 +258,7 @@ mod tests {
         }
 
         let test = TestArray {
-            data: vec![true, true, false],
+            data: vec![1e-6, 123.4, 3f64],
         };
 
         let mut encoded = encode(&test).unwrap();
@@ -267,7 +268,7 @@ mod tests {
         }
 
         let encoded = String::from_utf8(buf).unwrap();
-        assert_eq!(&encoded, "[true,true,false]");
+        assert_eq!(&encoded, "[0.000001,123.4,3]");
 
         let decoded: TestArray = decode(
             (),
@@ -275,6 +276,7 @@ mod tests {
         )
         .await
         .unwrap();
+
         assert_eq!(test, decoded);
     }
 
@@ -311,8 +313,8 @@ mod tests {
         )
         .await;
 
-        test_decode(" [ 1.23, 4e3, -3.45]\n", [1.23, 4e3, -3.45]).await;
-        test_encode_value(&[1.23, 4e3, -3.45], "[1.23,4000,-3.45]").await;
+        test_decode(" [ 1.23, 4e-3, -3.45]\n", [1.23, 4e-3, -3.45]).await;
+        test_encode_value(&[1.23, 4e-3, -3.45], "[1.23,0.004,-3.45]").await;
 
         test_decode(
             "[\"one\", \"two\", \"three\"]",
