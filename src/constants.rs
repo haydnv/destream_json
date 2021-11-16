@@ -1,6 +1,7 @@
 pub const COLON: &'static [u8] = b":";
 pub const COMMA: &'static [u8] = b",";
 pub const DECIMAL: &'static [u8] = b".";
+pub const E: &'static [u8] = b"e";
 pub const ESCAPE: &'static [u8] = b"\\";
 pub const FALSE: &[u8] = b"false";
 pub const TRUE: &[u8] = b"true";

@@ -313,8 +313,12 @@ mod tests {
         )
         .await;
 
-        test_decode(" [ 1.23, 4e-3, -3.45]\n", [1.23, 4e-3, -3.45]).await;
-        test_encode_value(&[1.23, 4e-3, -3.45], "[1.23,0.004,-3.45]").await;
+        test_decode(
+            " [ 10e-06, 1.23, 4e-3, -3.45]\n",
+            [10e-6, 1.23, 4e-3, -3.45],
+        )
+        .await;
+        test_encode_value(&[10e-6, 1.23, 4e-3, -3.45], "[0.00001,1.23,0.004,-3.45]").await;
 
         test_decode(
             "[\"one\", \"two\", \"three\"]",

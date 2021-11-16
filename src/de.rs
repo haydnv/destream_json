@@ -395,7 +395,7 @@ impl<S: Read> Decoder<S> {
     async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let mut i = 0;
         loop {
-            if self.buffer[i] == DECIMAL[0] {
+            if self.buffer[i] == DECIMAL[0] || self.buffer[i] == E[0] {
                 return de::Decoder::decode_f64(self, visitor).await;
             } else if !self.numeric.contains(&self.buffer[i]) {
                 return de::Decoder::decode_i64(self, visitor).await;
