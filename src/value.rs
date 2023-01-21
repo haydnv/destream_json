@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
 use number_general::Number;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Value {
-    Bytes(Bytes),
     List(Vec<Value>),
     Map(HashMap<String, Value>),
     None,
@@ -75,10 +73,6 @@ impl Visitor for ValueVisitor {
         Ok(Value::String(v))
     }
 
-    fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Value, E> {
-        Ok(Value::Bytes(Bytes::from(v)))
-    }
-
     fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
         Ok(Value::None)
     }
@@ -124,7 +118,6 @@ impl FromStream for Value {
 impl<'en> IntoStream<'en> for Value {
     fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Bytes(bytes) => bytes.into_stream(encoder),
             Self::List(list) => list.into_stream(encoder),
             Self::None => ().into_stream(encoder),
             Self::Map(map) => map.into_stream(encoder),
@@ -137,7 +130,6 @@ impl<'en> IntoStream<'en> for Value {
 impl<'en> ToStream<'en> for Value {
     fn to_stream<E: Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
-            Self::Bytes(bytes) => bytes.to_stream(encoder),
             Self::List(list) => list.to_stream(encoder),
             Self::None => ().into_stream(encoder),
             Self::Map(map) => map.to_stream(encoder),
@@ -150,7 +142,6 @@ impl<'en> ToStream<'en> for Value {
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Bytes(bytes) => fmt::Debug::fmt(bytes, f),
             Self::List(list) => fmt::Debug::fmt(list, f),
             Self::None => f.write_str("None"),
             Self::Map(map) => fmt::Debug::fmt(map, f),

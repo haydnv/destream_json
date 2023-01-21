@@ -172,29 +172,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bytes() {
-        struct BytesVisitor;
-        impl Visitor for BytesVisitor {
-            type Value = Vec<u8>;
-
-            fn expecting() -> &'static str {
-                "a byte buffer"
-            }
-
-            fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
-                Ok(v)
-            }
-        }
-
-        let utf8_str = "मकर संक्रान्ति";
-
-        let encoded = encode(Bytes::from(utf8_str.as_bytes())).unwrap();
-        let decoded: Bytes = try_decode((), encoded).await.unwrap();
-
-        assert_eq!(utf8_str, std::str::from_utf8(&decoded).unwrap());
-    }
-
-    #[tokio::test]
     async fn test_array() {
         #[derive(PartialEq)]
         struct TestArray {

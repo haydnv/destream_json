@@ -16,13 +16,17 @@ use crate::constants::*;
 
 const SNIPPET_LEN: usize = 50;
 
+/// Methods common to any decodable [`Stream`]
 #[async_trait]
 pub trait Read: Send + Unpin {
+    /// Read the next chunk of [`Bytes`] in this [`Stream`].
     async fn next(&mut self) -> Option<Result<Bytes, Error>>;
 
+    /// Return `true` if there are no more contents to be read from this [`Stream`].
     fn is_terminated(&self) -> bool;
 }
 
+/// A decodable [`Stream`]
 pub struct SourceStream<S> {
     source: Fuse<S>,
 }
@@ -307,6 +311,7 @@ impl<S: Stream> Decoder<SourceStream<S>>
 where
     SourceStream<S>: Read,
 {
+    /// Construct a new [`Decoder`] from the given source `stream`.
     pub fn from_stream(stream: S) -> Decoder<SourceStream<S>> {
         Decoder {
             source: SourceStream::from(stream),
@@ -315,6 +320,7 @@ where
         }
     }
 
+    /// Return `true` if this [`Decoder`] has no more data to be decoded.
     pub fn is_terminated(&self) -> bool {
         self.source.is_terminated()
     }
@@ -758,12 +764,6 @@ impl<S: Read> de::Decoder for Decoder<S> {
 
         let s = self.parse_string().await?;
         visitor.visit_string(s)
-    }
-
-    async fn decode_byte_buf<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
-        let encoded = self.parse_string().await?;
-        let decoded = base64::decode(encoded).map_err(de::Error::custom)?;
-        visitor.visit_byte_buf(decoded)
     }
 
     async fn decode_option<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {

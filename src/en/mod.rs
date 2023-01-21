@@ -14,6 +14,7 @@ use crate::constants::*;
 
 mod stream;
 
+/// A [`Stream`] of JSON-encoded data
 pub type JSONStream<'en> = Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Unpin + 'en>>;
 
 /// An error encountered while encoding a stream.
@@ -438,12 +439,6 @@ impl<'en> en::Encoder<'en> for Encoder {
         Ok(Box::pin(futures::stream::once(future::ready(Ok(
             chunk.into()
         )))))
-    }
-
-    #[inline]
-    fn encode_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        let encoded = base64::encode(v);
-        self.encode_str(&encoded)
     }
 
     #[inline]
