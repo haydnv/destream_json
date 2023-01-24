@@ -624,6 +624,11 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor.visit_bool(b)
     }
 
+    async fn decode_bytes<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
+        let s = self.parse_string().await?;
+        visitor.visit_string(s)
+    }
+
     async fn decode_i8<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let i = self.parse_number().await?;
         visitor.visit_i8(i)
@@ -792,6 +797,14 @@ impl<S: Read> de::Decoder for Decoder<S> {
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         self.parse_unit().await?;
         visitor.visit_unit()
+    }
+
+    async fn decode_uuid<V: Visitor>(
+        &mut self,
+        visitor: V,
+    ) -> Result<<V as Visitor>::Value, Self::Error> {
+        let s = self.parse_string().await?;
+        visitor.visit_string(s)
     }
 
     async fn decode_tuple<V: Visitor>(

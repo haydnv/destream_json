@@ -9,6 +9,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use destream::en::{self, IntoStream};
 use futures::future;
 use futures::stream::{Stream, StreamExt};
+use uuid::Uuid;
 
 use crate::constants::*;
 
@@ -221,6 +222,14 @@ impl<'en> en::Encoder<'en> for Encoder {
     #[inline]
     fn encode_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(encode_fmt(v))
+    }
+
+    #[inline]
+    fn encode_bytes<B: Into<Bytes>>(self, v: B) -> Result<Self::Ok, Self::Error> {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::engine::Engine;
+
+        self.encode_str(&STANDARD.encode(v.into()))
     }
 
     #[inline]
@@ -489,6 +498,16 @@ impl<'en> en::Encoder<'en> for Encoder {
     #[inline]
     fn encode_tuple(self, len: usize) -> Result<Self::EncodeTuple, Self::Error> {
         Ok(SequenceEncoder::new(Some(len)))
+    }
+
+    #[inline]
+    fn encode_uuid(self, uuid: Uuid) -> Result<Self::Ok, Self::Error> {
+        Ok(encode_fmt(uuid))
+    }
+
+    #[inline]
+    fn collect_bytes<B: IntoIterator<Item = u8>>(self, bytes: B) -> Result<Self::Ok, Self::Error> {
+        self.encode_bytes(bytes.into_iter().collect::<Vec<u8>>())
     }
 }
 
