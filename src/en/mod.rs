@@ -502,7 +502,7 @@ impl<'en> en::Encoder<'en> for Encoder {
 
     #[inline]
     fn encode_uuid(self, uuid: Uuid) -> Result<Self::Ok, Self::Error> {
-        Ok(encode_fmt(uuid))
+        self.encode_str(&uuid.to_string())
     }
 
     #[inline]

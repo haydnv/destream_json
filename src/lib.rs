@@ -41,7 +41,7 @@ mod tests {
 
     use async_trait::async_trait;
     use bytes::Bytes;
-    use destream::de::{self, ArrayAccess, FromStream, Visitor};
+    use destream::de::{self, ArrayAccess, FromStream};
     use destream::en::{Encoder, IntoStream};
     use futures::future;
     use futures::stream::{self, Stream, StreamExt, TryStreamExt};
@@ -435,8 +435,9 @@ mod tests {
     #[cfg(feature = "value")]
     #[tokio::test]
     async fn test_complex_list_with_err() {
-        use crate::Value;
         use futures::TryFutureExt;
+        use destream::de::Visitor;
+        use crate::Value;
 
         #[derive(Eq, PartialEq)]
         struct Class {
