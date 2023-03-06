@@ -435,9 +435,9 @@ mod tests {
     #[cfg(feature = "value")]
     #[tokio::test]
     async fn test_complex_list_with_err() {
-        use futures::TryFutureExt;
-        use destream::de::Visitor;
         use crate::Value;
+        use destream::de::Visitor;
+        use futures::TryFutureExt;
 
         #[derive(Eq, PartialEq)]
         struct Class {

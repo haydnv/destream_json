@@ -15,6 +15,51 @@ pub enum Value {
     String(String),
 }
 
+impl FromIterator<Value> for Value {
+    fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
+        Self::List(iter.into_iter().collect())
+    }
+}
+
+impl FromIterator<(String, Value)> for Value {
+    fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+        Self::Map(iter.into_iter().collect())
+    }
+}
+
+impl From<()> for Value {
+    fn from(_unit: ()) -> Self {
+        Self::None
+    }
+}
+
+macro_rules! from_number {
+    ($t:ty) => {
+        impl From<$t> for Value {
+            fn from(n: $t) -> Self {
+                Self::Number(n.into())
+            }
+        }
+    };
+}
+
+from_number!(bool);
+from_number!(u8);
+from_number!(u16);
+from_number!(u32);
+from_number!(u64);
+from_number!(i16);
+from_number!(i32);
+from_number!(i64);
+from_number!(f32);
+from_number!(f64);
+
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
 struct ValueVisitor;
 
 #[async_trait]
