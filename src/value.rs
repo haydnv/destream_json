@@ -15,6 +15,12 @@ pub enum Value {
     String(String),
 }
 
+impl Default for Value {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 impl FromIterator<Value> for Value {
     fn from_iter<T: IntoIterator<Item = Value>>(iter: T) -> Self {
         Self::List(iter.into_iter().collect())
