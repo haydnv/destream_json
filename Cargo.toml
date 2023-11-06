@@ -1,6 +1,6 @@
 [package]
 name = "destream_json"
-version = "0.11.1"
+version = "0.12.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 license = "Apache-2.0"
@@ -23,13 +23,13 @@ base64 = "0.21"
 bytes = "1.5"
 destream = "0.7"
 futures = "0.3"
-number-general = { version = "0.10", optional = true }
+number-general = { version = "0.11", optional = true }
 pin-project = "1.1"
-tokio = { version = "1.32", features = ["io-util"], optional = true }
-uuid = "1.4"
+tokio = { version = "1.33", features = ["io-util"], optional = true }
+uuid = "1.5"
 
 [dev-dependencies]
-number-general = { version = "0.10", features=["stream"] }
-tokio = { version = "1.32", features = ["fs", "macros"] }
+number-general = { version = "0.11", features=["stream"] }
+tokio = { version = "1.33", features = ["fs", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tokio-test = "0.4"
