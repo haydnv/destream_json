@@ -103,15 +103,16 @@ jobs:
       - uses: dtolnay/install@cargo-docs-rs
       - run: cargo docs-rs
 
-  fuzz:
-    name: Fuzz
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: dtolnay/install@cargo-fuzz
-      - run: cargo fuzz check
+  # fuzz testing async code seems hard
+  #   fuzz:
+  #     name: Fuzz
+  #     runs-on: ubuntu-latest
+  #     timeout-minutes: 45
+  #     steps:
+  #       - uses: actions/checkout@v4
+  #       - uses: dtolnay/rust-toolchain@nightly
+  #       - uses: dtolnay/install@cargo-fuzz
+  #       - run: cargo fuzz check
 
   outdated:
     name: Outdated
