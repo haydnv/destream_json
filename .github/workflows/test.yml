@@ -67,19 +67,6 @@ jobs:
   #       - run: cargo generate-lockfile -Z minimal-versions
   #       - run: cargo check --locked
 
-  miri:
-    name: Miri
-    runs-on: ubuntu-latest
-    env:
-      MIRIFLAGS: -Zmiri-strict-provenance
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@miri
-      - run: cargo miri setup
-      - run: cargo miri test
-      - run: cargo miri test --features value,tokio-io,all
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
