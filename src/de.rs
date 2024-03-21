@@ -303,7 +303,7 @@ where
 impl<S> Decoder<S> {
     fn contents(&self, max_len: usize) -> Result<String, Error> {
         let len = Ord::min(self.buffer.len(), max_len);
-        String::from_utf8(self.buffer[..len].to_vec()).map_err(|cause| Error::invalid_utf8(cause))
+        String::from_utf8(self.buffer[..len].to_vec()).map_err(Error::invalid_utf8)
     }
 }
 
@@ -511,7 +511,7 @@ impl<S: Read> Decoder<S> {
 
         let i = Ord::min(self.buffer.len(), SNIPPET_LEN);
         let unknown = String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
-        Err(de::Error::invalid_value(unknown, &"a boolean"))
+        Err(de::Error::invalid_value(unknown, "a boolean"))
     }
 
     async fn parse_number<N: FromStr>(&mut self) -> Result<N, Error>
@@ -529,7 +529,7 @@ impl<S: Read> Decoder<S> {
                 self.buffer.drain(..i);
                 Ok(number)
             }
-            Err(cause) => Err(de::Error::invalid_value(cause, &std::any::type_name::<N>())),
+            Err(cause) => Err(de::Error::invalid_value(cause, std::any::type_name::<N>())),
         }
     }
 
@@ -553,7 +553,7 @@ impl<S: Read> Decoder<S> {
             let as_str =
                 String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
 
-            Err(de::Error::invalid_type(as_str, &"null"))
+            Err(de::Error::invalid_type(as_str, "null"))
         }
     }
 }
@@ -579,9 +579,9 @@ impl<S: Read> de::Decoder for Decoder<S> {
             self.decode_map(visitor).await
         } else if self.numeric.contains(&self.buffer[0]) {
             self.decode_number(visitor).await
-        } else if self.buffer.len() >= FALSE.len() && self.buffer.starts_with(FALSE) {
-            self.decode_bool(visitor).await
-        } else if self.buffer.len() >= TRUE.len() && self.buffer.starts_with(TRUE) {
+        } else if (self.buffer.len() >= FALSE.len() && self.buffer.starts_with(FALSE))
+            || (self.buffer.len() >= TRUE.len() && self.buffer.starts_with(TRUE))
+        {
             self.decode_bool(visitor).await
         } else if self.buffer.len() >= NULL.len() && self.buffer.starts_with(NULL) {
             self.decode_option(visitor).await
@@ -612,7 +612,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
 
                     Err(de::Error::invalid_value(
                         s,
-                        &std::any::type_name::<V::Value>(),
+                        std::any::type_name::<V::Value>(),
                     ))
                 }
             }
