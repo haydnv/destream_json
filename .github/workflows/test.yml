@@ -50,10 +50,10 @@ jobs:
         with:
           toolchain: ${{matrix.rust}}
           targets: ${{matrix.target}}
-      - run: cargo check --manifest-path tests/crate/Cargo.toml
-      - run: cargo check --manifest-path tests/crate/Cargo.toml --features tokio-io
-      - run: cargo check --manifest-path tests/crate/Cargo.toml --features value
-      - run: cargo check --manifest-path tests/crate/Cargo.toml --features all
+      - run: cargo check
+      - run: cargo check --features tokio-io
+      - run: cargo check --features value
+      - run: cargo check --features all
 
   minimal:
     name: Minimal versions
