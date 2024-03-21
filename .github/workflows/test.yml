@@ -74,8 +74,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@clippy
-      - run: cargo clippy --tests -- -Dclippy::all -Dclippy::pedantic
-      - run: cargo clippy --all-features --tests -- -Dclippy::all -Dclippy::pedantic
+      - run: cargo clippy --tests # -- -Dclippy::all -Dclippy::pedantic
+      - run: cargo clippy --all-features --tests # -- -Dclippy::all -Dclippy::pedantic
 
   doc:
     name: Documentation

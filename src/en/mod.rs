@@ -204,7 +204,9 @@ impl Encoder {
     where
         <T as IntoIterator>::IntoIter: Send + Unpin + 'en,
     {
-        let sequence = chunks.map(|chunk| futures::stream::iter(chunk)).flatten();
+        let sequence = chunks
+            .map(|chunk| futures::stream::iter(chunk))
+            .flatten();
 
         en::Encoder::encode_seq_stream(self, sequence)
     }

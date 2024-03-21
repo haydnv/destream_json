@@ -53,12 +53,12 @@ mod tests {
         expected: T,
     ) {
         for i in (1..encoded.len()).rev() {
-            let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+            let source = stream::iter(encoded.as_bytes().iter().cloned())
                 .chunks(i)
                 .map(Bytes::from);
 
             let actual: T = decode((), source).await.unwrap();
-            assert_eq!(expected, actual)
+            assert_eq!(expected, actual);
         }
     }
 
@@ -140,11 +140,13 @@ mod tests {
         test_decode("1e-6", 1e-6).await;
         test_decode("2e2", 2e2_f32).await;
         test_decode("-2e-3", -2e-3_f64).await;
+        #[allow(clippy::approx_constant)]
         test_decode("3.14", 3.14_f32).await;
         test_decode("-1.414e4", -1.414e4_f64).await;
 
         test_encode_value(2e2_f32, "200").await;
         test_encode_value(-2e3, "-2000").await;
+        #[allow(clippy::approx_constant)]
         test_encode_value(3.14_f32, "3.14").await;
         test_encode_value(-1.414e4_f64, "-14140").await;
 
@@ -215,7 +217,7 @@ mod tests {
                 &'en self,
                 encoder: E,
             ) -> Result<E::Ok, E::Error> {
-                encoder.encode_array_f64(stream::once(future::ready(self.data.to_vec())))
+                encoder.encode_array_f64(stream::once(future::ready(self.data.clone())))
             }
         }
 
@@ -407,7 +409,7 @@ mod tests {
         }
 
         let encoded = "{\"k1\": [1, 2, 3]}";
-        let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+        let source = stream::iter(encoded.as_bytes().iter().copied())
             .chunks(5)
             .map(Bytes::from);
 
@@ -415,7 +417,7 @@ mod tests {
         assert_eq!(actual, TestMap);
 
         let encoded = "\t[ 1,2, 3]";
-        let source = stream::iter(encoded.as_bytes().into_iter().cloned())
+        let source = stream::iter(encoded.as_bytes().iter().copied())
             .chunks(2)
             .map(Bytes::from);
 
