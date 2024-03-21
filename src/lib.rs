@@ -36,26 +36,17 @@ mod value;
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fmt;
-    use std::iter::FromIterator;
     use std::marker::PhantomData;
 
     use async_trait::async_trait;
     use bytes::Bytes;
     use destream::de::{self, ArrayAccess, FromStream};
-    use destream::en::{Encoder, IntoStream};
+    use destream::en::IntoStream;
     use futures::future;
     use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 
     use super::de::*;
     use super::en::*;
-
-    struct Error;
-
-    impl<'en> IntoStream<'en> for Error {
-        fn into_stream<E: Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-            "an error!".into_stream(encoder)
-        }
-    }
 
     async fn test_decode<T: FromStream<Context = ()> + PartialEq + fmt::Debug>(
         encoded: &str,

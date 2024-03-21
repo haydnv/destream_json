@@ -1,8 +1,10 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -12,7 +14,7 @@ env:
 
 jobs:
   test:
-    name: Rust nightly ${{matrix.os == 'windows' && '(windows)' || ''}}
+    name: Rust Nightly Tests ${{matrix.os == 'windows' && '(windows)' || ''}}
     runs-on: ${{matrix.os}}-latest
     strategy:
       fail-fast: false
