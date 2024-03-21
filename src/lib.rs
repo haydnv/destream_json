@@ -614,7 +614,10 @@ mod tests {
         let mut value = HashMap::new();
         value.insert("one".to_string(), Some(Number::from(1)));
         value.insert("two".to_string(), None);
-        value.insert("three".to_string(), Some(Number::from(PI)));
+        value.insert(
+            "three".to_string(),
+            Some(Number::from(std::f32::consts::PI)),
+        );
 
         let path = PathBuf::from(".tmp");
 
