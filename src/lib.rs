@@ -331,19 +331,22 @@ mod tests {
                     "spam".to_string(),
                     Value::Map(HashMap::new()),
                 )))),
-                Value::Number(100u64.into()),
+                Value::Number(100i64.into()),
             ]),
             Value::List(vec![
                 Value::String("foo".to_string()),
                 Value::Map(HashMap::from_iter(iter::once((
                     "bar".to_string(),
-                    Value::List(vec![]),
+                    Value::List(vec![
+                        Value::Number(true.into()),
+                        Value::Number(false.into()),
+                    ]),
                 )))),
             ]),
         ]);
 
         test_decode(
-            "[[\"baz\", {\"spam\": {}}, 100], [\"foo\", {\"bar\": []}]]",
+            "[[\"baz\", {\"spam\": {}}, 100], [\"foo\", {\"bar\": [true, false]}]]",
             expected,
         )
         .await;
