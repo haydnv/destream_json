@@ -331,7 +331,7 @@ mod tests {
                     "spam".to_string(),
                     Value::Map(HashMap::new()),
                 )))),
-                Value::Number(100i64.into()),
+                Value::Number(100u64.into()),
             ]),
             Value::List(vec![
                 Value::String("foo".to_string()),
