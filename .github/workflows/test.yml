@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  test:
+    name: Rust Nightly Tests ${{matrix.os == 'windows' && '(windows)' || ''}}
+    runs-on: ${{matrix.os}}-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, windows]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo test
+      - run: cargo test --features tokio-io --tests -- --skip ui --exact
+      - run: cargo test --features value --tests -- --skip ui --exact
+      - run: cargo test --features all --tests -- --skip ui --exact
+
+  build:
+    name: Rust ${{matrix.rust}} ${{matrix.os == 'windows' && '(windows)' || ''}}
+    runs-on: ${{matrix.os}}-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [beta, 1.76.0, 1.65.0]
+        os: [ubuntu]
+        include:
+          - rust: stable
+            os: ubuntu
+            target: aarch64-unknown-none
+          - rust: stable
+            os: windows
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{matrix.rust}}
+          targets: ${{matrix.target}}
+      - run: cargo check
+      - run: cargo check --features tokio-io
+      - run: cargo check --features value
+      - run: cargo check --features all
+
+  # this fails right now because of errors in get-size-derive.
+  # number-general should require 0.1.3
+  #   minimal:
+  #     name: Minimal versions
+  #     runs-on: ubuntu-latest
+  #     timeout-minutes: 45
+  #     steps:
+  #       - uses: actions/checkout@v4
+  #       - uses: dtolnay/rust-toolchain@nightly
+  #       - run: cargo generate-lockfile -Z minimal-versions
+  #       - run: cargo check --locked
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - run: cargo clippy --tests # -- -Dclippy::all -Dclippy::pedantic
+      - run: cargo clippy --all-features --tests # -- -Dclippy::all -Dclippy::pedantic
+
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUSTDOCFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/install@cargo-docs-rs
+      - run: cargo docs-rs
+
+  # fuzz testing async code seems hard
+  #   fuzz:
+  #     name: Fuzz
+  #     runs-on: ubuntu-latest
+  #     timeout-minutes: 45
+  #     steps:
+  #       - uses: actions/checkout@v4
+  #       - uses: dtolnay/rust-toolchain@nightly
+  #       - uses: dtolnay/install@cargo-fuzz
+  #       - run: cargo fuzz check
+
+  outdated:
+    name: Outdated
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/install@cargo-outdated
+      - run: cargo outdated --exit-code 1

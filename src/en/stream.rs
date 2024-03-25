@@ -45,10 +45,7 @@ impl<'en> Stream for JSONMapEntryStream<'en> {
                 None => Some(Ok(Bytes::from_static(COLON))),
             }
         } else if !this.value.is_terminated() {
-            match ready!(this.value.as_mut().poll_next(cxt)) {
-                Some(result) => Some(result),
-                None => None,
-            }
+            ready!(this.value.as_mut().poll_next(cxt))
         } else {
             None
         };
@@ -102,17 +99,17 @@ impl<I: Stream<Item = Result<Bytes, super::Error>>, S: Stream<Item = Result<I, s
                             break Some(Ok(Bytes::from_static(COMMA)));
                         } else {
                             *this.started = true;
-                            break Some(Ok(Bytes::from_static(*this.start)));
+                            break Some(Ok(Bytes::from_static(this.start)));
                         }
                     }
                     Some(Err(cause)) => break Some(Err(en::Error::custom(cause))),
                     None if !*this.started => {
                         *this.started = true;
-                        break Some(Ok(Bytes::from_static(*this.start)));
+                        break Some(Ok(Bytes::from_static(this.start)));
                     }
                     None if !*this.finished => {
                         *this.finished = true;
-                        break Some(Ok(Bytes::from_static(*this.end)));
+                        break Some(Ok(Bytes::from_static(this.end)));
                     }
                     None => break None,
                 },

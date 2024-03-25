@@ -204,9 +204,7 @@ impl Encoder {
     where
         <T as IntoIterator>::IntoIter: Send + Unpin + 'en,
     {
-        let sequence = chunks
-            .map(|chunk| futures::stream::iter(chunk.into_iter()))
-            .flatten();
+        let sequence = chunks.map(futures::stream::iter).flatten();
 
         en::Encoder::encode_seq_stream(self, sequence)
     }
@@ -530,7 +528,7 @@ fn escape<T: fmt::Display>(value: T) -> Bytes {
 #[inline]
 fn encode_fmt<'en, T: fmt::Display>(value: T) -> JSONStream<'en> {
     let encoded = escape(value);
-    Box::pin(futures::stream::once(future::ready(Ok(encoded.into()))))
+    Box::pin(futures::stream::once(future::ready(Ok(encoded))))
 }
 
 #[inline]
