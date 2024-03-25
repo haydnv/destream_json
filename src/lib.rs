@@ -431,7 +431,9 @@ mod tests {
     #[cfg(feature = "value")]
     #[tokio::test]
     async fn test_ignored_any() {
-        struct IgnoredValue;
+        enum IgnoredValue {
+            None,
+        }
 
         #[async_trait]
         impl FromStream for IgnoredValue {
@@ -442,7 +444,10 @@ mod tests {
                 impl Visitor for IgnoredVisitor {
                     type Value = IgnoredValue;
                     fn expecting() -> &'static str {
-                        todo!()
+                        "any json to be ignored"
+                    }
+                    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                        Ok(Self::Value::None)
                     }
                 }
                 decoder.decode_ignored_any(IgnoredVisitor).await
@@ -466,8 +471,8 @@ mod tests {
             \"unicode_characters\": \"💡🌟🔑\",
             \"empty_array\": [],
             \"empty_object\": {},
-            \"multiline_string\": \"This is a\nmultiline\nstring.\",
-            \"escaped_characters\": \"Escaped characters: \\\" \\\\ \\/ \\b \\f \\n \\r \\t\"
+            \"multiline_string\": \"This is a\\nmultiline\\nstring.\",
+            \"escaped_characters\": \"Escaped characters: \\\" \\\\ \\/ \\b \\f \\n \\r \\t \\u1234\"
           }";
 
         let source = stream::iter(encoded.as_bytes().iter().copied())
