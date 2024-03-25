@@ -1179,9 +1179,9 @@ mod tests {
                 .map(Result::<Bytes, Error>::Ok);
 
             let mut decoder = Decoder::from_stream(source);
-            for i in 0..s.len() {
-                let ch = decoder.next_or_eof().await.unwrap();
-                assert_eq!(ch, s[i]);
+            for expected in s {
+                let actual = decoder.next_or_eof().await.unwrap();
+                assert_eq!(&actual, expected);
             }
             let res = decoder.next_or_eof().await;
             assert!(res.is_err());
