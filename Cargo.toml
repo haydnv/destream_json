@@ -18,19 +18,19 @@ value = ["number-general/stream"]
 all = ["tokio-io", "value"]
 
 [dependencies]
-async-recursion = "1.1.0"
-async-trait = "0.1.78"
+async-recursion = "1.1"
+async-trait = "0.1"
 base64 = "0.22"
 bytes = "1.5"
 destream = "0.7"
 futures = "0.3"
-number-general = { version = "0.11.1", optional = true }
+number-general = { version = "0.11", optional = true }
 pin-project = "1.1"
 tokio = { version = "1.35", features = ["io-util"], optional = true }
 uuid = "1.6"
 
 [dev-dependencies]
-number-general = { version = "0.11.1", features=["stream"] }
+number-general = { version = "0.11", features=["stream"] }
 tokio = { version = "1.35", features = ["fs", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tokio-test = "0.4"
