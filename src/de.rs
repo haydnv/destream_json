@@ -519,18 +519,21 @@ impl<S: Read> Decoder<S> {
 
     async fn ignore_string(&mut self) -> Result<(), Error> {
         // eat the first char, which is a quote
-        self.next_or_eof().await?;
+        self.eat_char().await?;
         loop {
             if self.buffer.is_empty() {
                 self.buffer().await?;
             }
+
             if self.buffer.is_empty() && self.source.is_terminated() {
                 return Err(Error::unexpected_end());
             }
+
             let ch = self.next_or_eof().await?;
             if !ESCAPE_CHARS[ch as usize] {
                 continue;
             }
+
             match ch {
                 b'"' => {
                     return Ok(());
