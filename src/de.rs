@@ -412,10 +412,6 @@ impl<S: Read> Decoder<S> {
         }
     }
 
-    async fn peek_or_null(&mut self) -> Result<u8, Error> {
-        Ok(self.peek().await?.unwrap_or(b'\x00'))
-    }
-
     async fn next_char(&mut self) -> Result<Option<u8>, Error> {
         while self.buffer.is_empty() && !self.source.is_terminated() {
             self.buffer().await?;
@@ -427,10 +423,6 @@ impl<S: Read> Decoder<S> {
     async fn eat_char(&mut self) -> Result<(), Error> {
         self.next_char().await?;
         Ok(())
-    }
-
-    async fn next_char_or_null(&mut self) -> Result<u8, Error> {
-        Ok(self.next_char().await?.unwrap_or(b'\x00'))
     }
 
     async fn next_or_eof(&mut self) -> Result<u8, Error> {
@@ -694,31 +686,29 @@ impl<S: Read> Decoder<S> {
     }
 
     async fn ignore_number(&mut self) -> Result<(), Error> {
-        let ch = self.next_char_or_null().await?;
+        let ch = self.next_char().await?;
         match ch {
-            b'0' => {
+            Some(b'0') => {
                 // There cannot be any leading zeroes.
                 // If there is a leading '0', it cannot be followed by more digits.
-                if let b'0'..=b'9' = self.peek_or_null().await? {
+                if let Some(b'0'..=b'9') = self.peek().await? {
                     return Err(Error::invalid_utf8("invalid number, two leading zeroes"));
                 }
             }
-            b'1'..=b'9' => {
-                while let b'0'..=b'9' = self.peek_or_null().await? {
+            Some(b'1'..=b'9') => {
+                while let Some(b'0'..=b'9') = self.peek().await? {
                     self.eat_char().await?;
                 }
             }
-            _ => {
-                return Err(Error::invalid_utf8(format!(
-                    "invalid number: {}",
-                    self.peek_or_null().await?
-                )));
+            Some(ch) => {
+                return Err(Error::invalid_utf8(format!("invalid number: {}", ch)));
             }
+            None => return Err(Error::unexpected_end()),
         }
 
-        match self.peek_or_null().await? {
-            b'.' => self.ignore_decimal().await,
-            b'e' | b'E' => self.ignore_exponent().await,
+        match self.peek().await? {
+            Some(b'.') => self.ignore_decimal().await,
+            Some(b'e' | b'E') => self.ignore_exponent().await,
             _ => Ok(()),
         }
     }
@@ -727,7 +717,7 @@ impl<S: Read> Decoder<S> {
         self.eat_char().await?;
 
         let mut at_least_one_digit = false;
-        while let b'0'..=b'9' = self.peek_or_null().await? {
+        while let Some(b'0'..=b'9') = self.peek().await? {
             self.eat_char().await?;
             at_least_one_digit = true;
         }
@@ -738,8 +728,8 @@ impl<S: Read> Decoder<S> {
             ));
         }
 
-        match self.peek_or_null().await? {
-            b'e' | b'E' => self.ignore_exponent().await,
+        match self.peek().await? {
+            Some(b'e' | b'E') => self.ignore_exponent().await,
             _ => Ok(()),
         }
     }
@@ -747,22 +737,23 @@ impl<S: Read> Decoder<S> {
     async fn ignore_exponent(&mut self) -> Result<(), Error> {
         self.next_char().await?;
 
-        match self.peek_or_null().await? {
-            b'+' | b'-' => self.eat_char().await?,
+        match self.peek().await? {
+            Some(b'+' | b'-') => self.eat_char().await?,
             _ => {}
         }
 
         // Make sure a digit follows the exponent place.
-        match self.next_char_or_null().await? {
-            b'0'..=b'9' => {}
-            ch => {
+        match self.next_char().await? {
+            Some(b'0'..=b'9') => {}
+            Some(ch) => {
                 return Err(Error::invalid_utf8(format!(
                     "expected a digit to follow the exponent, found {ch}"
                 )));
             }
+            None => return Err(Error::unexpected_end()),
         }
 
-        while let b'0'..=b'9' = self.peek_or_null().await? {
+        while let Some(b'0'..=b'9') = self.peek().await? {
             self.eat_char().await?;
         }
 
