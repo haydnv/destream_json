@@ -400,7 +400,7 @@ impl<S: Read> Decoder<S> {
         Ok(i)
     }
 
-    pub(crate) async fn peek(&mut self) -> Result<Option<u8>, Error> {
+    async fn peek(&mut self) -> Result<Option<u8>, Error> {
         while self.buffer.is_empty() && !self.source.is_terminated() {
             self.buffer().await?;
         }
