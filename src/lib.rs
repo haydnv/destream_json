@@ -430,6 +430,60 @@ mod tests {
 
     #[cfg(feature = "value")]
     #[tokio::test]
+    async fn test_ignored_any() {
+        enum IgnoredValue {
+            None,
+        }
+
+        #[async_trait]
+        impl FromStream for IgnoredValue {
+            type Context = ();
+            async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+                use destream::Visitor;
+                struct IgnoredVisitor;
+                impl Visitor for IgnoredVisitor {
+                    type Value = IgnoredValue;
+                    fn expecting() -> &'static str {
+                        "any json to be ignored"
+                    }
+                    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                        Ok(Self::Value::None)
+                    }
+                }
+                decoder.decode_ignored_any(IgnoredVisitor).await
+            }
+        }
+
+        let encoded = r#"{
+            "string": "Hello, world!",
+            "number": 42,
+            "boolean": true,
+            "array": [1, 2, 3],
+            "object": {"key": "value"},
+            "null_value": null,
+            "nested_object": {
+              "nested_string": "Nested string",
+              "nested_number": 3.14,
+              "nested_boolean": false,
+              "nested_array": ["apple", "banana", "orange"],
+              "nested_null": null
+            },
+            "unicode_characters": "💡🌟🔑",
+            "empty_array": [],
+            "empty_object": {},
+            "multiline_string": "This is a\nmultiline\nstring.",
+            "escaped_characters": "Escaped characters: \" \\ \/ \b \f \n \r \t \u1234"
+          }"#;
+
+        let source = stream::iter(encoded.as_bytes().iter().copied())
+            .chunks(2)
+            .map(Bytes::from);
+
+        let _: IgnoredValue = decode((), source).await.unwrap();
+    }
+
+    #[cfg(feature = "value")]
+    #[tokio::test]
     async fn test_complex_list_with_err() {
         use crate::Value;
         use destream::de::Visitor;
