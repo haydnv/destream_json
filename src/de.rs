@@ -724,11 +724,11 @@ impl<S: Read> Decoder<S> {
     }
 
     async fn ignore_decimal(&mut self) -> Result<(), Error> {
-        self.next_char().await?;
+        self.eat_char().await?;
 
         let mut at_least_one_digit = false;
         while let b'0'..=b'9' = self.peek_or_null().await? {
-            self.next_char().await?;
+            self.eat_char().await?;
             at_least_one_digit = true;
         }
 
@@ -775,40 +775,40 @@ impl<S: Read> Decoder<S> {
 
         loop {
             self.expect_whitespace().await?;
-            match self.peek_or_null().await? {
-                b']' => {
+            match self.peek().await? {
+                Some(b',') => self.eat_char().await?,
+                Some(b']') => {
                     self.eat_char().await?;
                     return Ok(());
                 }
-                b',' => {
-                    self.ignore_exactly(",").await?;
-                }
-                _ => {
-                    self.ignore_value().await?;
-                }
+                Some(_) => {}
+                None => return Err(Error::unexpected_end()),
             }
+            self.ignore_value().await?;
         }
     }
 
     #[async_recursion]
     async fn ignore_object(&mut self) -> Result<(), Error> {
-        self.eat_char().await?; // {
+        self.eat_char().await?; // b'{'
 
         loop {
             self.expect_whitespace().await?;
-            match self.peek_or_null().await? {
-                b'}' => {
+            match self.peek().await? {
+                Some(b'}') => {
                     self.eat_char().await?;
                     return Ok(());
                 }
-                b',' => self.eat_char().await?,
-                _ => {
-                    self.ignore_string().await?; // key
-                    self.expect_whitespace().await?;
-                    self.ignore_exactly(":").await?;
-                    self.ignore_value().await?;
-                }
+                Some(b',') => self.eat_char().await?,
+                Some(_) => {}
+                None => return Err(Error::unexpected_end()),
             }
+
+            self.expect_whitespace().await?;
+            self.ignore_string().await?; // key
+            self.expect_whitespace().await?;
+            self.ignore_exactly(":").await?;
+            self.ignore_value().await?;
         }
     }
 }
