@@ -454,26 +454,26 @@ mod tests {
             }
         }
 
-        let encoded = "{
-            \"string\": \"Hello, world!\",
-            \"number\": 42,
-            \"boolean\": true,
-            \"array\": [1, 2, 3],
-            \"object\": {\"key\": \"value\"},
-            \"null_value\": null,
-            \"nested_object\": {
-              \"nested_string\": \"Nested string\",
-              \"nested_number\": 3.14,
-              \"nested_boolean\": false,
-              \"nested_array\": [\"apple\", \"banana\", \"orange\"],
-              \"nested_null\": null
+        let encoded = r#"{
+            "string": "Hello, world!",
+            "number": 42,
+            "boolean": true,
+            "array": [1, 2, 3],
+            "object": {"key": "value"},
+            "null_value": null,
+            "nested_object": {
+              "nested_string": "Nested string",
+              "nested_number": 3.14,
+              "nested_boolean": false,
+              "nested_array": ["apple", "banana", "orange"],
+              "nested_null": null
             },
-            \"unicode_characters\": \"💡🌟🔑\",
-            \"empty_array\": [],
-            \"empty_object\": {},
-            \"multiline_string\": \"This is a\\nmultiline\\nstring.\",
-            \"escaped_characters\": \"Escaped characters: \\\" \\\\ \\/ \\b \\f \\n \\r \\t \\u1234\"
-          }";
+            "unicode_characters": "💡🌟🔑",
+            "empty_array": [],
+            "empty_object": {},
+            "multiline_string": "This is a\nmultiline\nstring.",
+            "escaped_characters": "Escaped characters: \" \\ \/ \b \f \n \r \t \u1234"
+          }"#;
 
         let source = stream::iter(encoded.as_bytes().iter().copied())
             .chunks(2)
