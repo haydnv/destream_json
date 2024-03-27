@@ -740,9 +740,8 @@ impl<S: Read> Decoder<S> {
     async fn ignore_exponent(&mut self) -> Result<(), Error> {
         self.next_char().await?;
 
-        match self.peek().await? {
-            Some(b'+' | b'-') => self.eat_char().await?,
-            _ => {}
+        if let Some(b'+' | b'-') = self.peek().await? {
+            self.eat_char().await?;
         }
 
         // Make sure a digit follows the exponent place.
