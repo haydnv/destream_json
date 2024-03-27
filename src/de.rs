@@ -678,11 +678,14 @@ impl<S: Read> Decoder<S> {
 
     async fn ignore_exactly(&mut self, s: &str) -> Result<(), Error> {
         for ch in s.as_bytes() {
-            let next = self.next_or_eof().await?;
-            if &next != ch {
-                return Err(Error::invalid_utf8(format!(
-                    "invalid char {next}, expected {ch}"
-                )));
+            match self.peek().await?.as_ref() {
+                None => return Err(Error::unexpected_end()),
+                Some(next) if next == ch => self.eat_char().await?,
+                Some(next) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {next}, expected {ch}"
+                    )));
+                }
             }
         }
         Ok(())
@@ -1182,88 +1185,65 @@ mod tests {
     }
 
     /// ignore_exactly takes a vector of bytes, and consumes exactly those characters.
+    #[test_case("foo", "foo", true, 0; "ignore foo")]
+    #[test_case("foobar", "foo", true, 3; "ignore foo not bar")]
+    #[test_case("foobar", "bar", false, 6; "wrong expected str")]
     #[tokio::test]
-    async fn test_ignore_exactly() {
-        let inputs = [("foo", "foo", true, 0), ("foobar", "foo", true, 3)];
+    async fn test_ignore_exactly(source: &str, to_ignore: &str, success: bool, chars_left: usize) {
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(source.len())
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
 
-        for input in inputs {
-            let source = input.0;
-            let to_ignore = input.1;
-            let success = input.2;
-            let chars_left = input.3;
+        let mut decoder = Decoder::from_stream(source);
 
-            let source = stream::iter(source.as_bytes().iter().copied())
-                .chunks(source.len())
-                .map(Bytes::from)
-                .map(Result::<Bytes, Error>::Ok);
-
-            let mut decoder = Decoder::from_stream(source);
-
-            let res = decoder.ignore_exactly(to_ignore).await;
-            assert_eq!(res.is_ok(), success);
-            assert_eq!(decoder.buffer.len(), chars_left);
-        }
+        let res = decoder.ignore_exactly(to_ignore).await;
+        assert_eq!(res.is_ok(), success);
+        assert_eq!(decoder.buffer.len(), chars_left);
     }
 
-    /// ignore_string should consume the stream until the end of the current string.
+    #[test_case("\"foo\"bar", 3; "ends correctly")]
+    #[test_case("\"test\"", 0; "string value")]
+    #[test_case("\"\"", 0; "empty")]
+    #[test_case("\"\\r\"", 0; "carriage return")]
+    #[test_case("\"hello\"world\"", 6; "multiple quotes")]
+    #[test_case("\"   hello\"", 0; "whitespace before")]
+    #[test_case("\"hello   \"   ", 3; "whitespace after")]
+    #[test_case("\"\\t\\n\\r\"", 0; "whitespace chars")]
+    #[test_case("\"\"test\\\"", 6; "chars after empty string")]
+    #[test_case("\"\\\\\\\\\"", 0; "backslashs")]
     #[tokio::test]
-    async fn test_ignore_string() {
-        let inputs = [
-            ("\"foo\"bar", 3),
-            ("\"test\"", 0),
-            ("\"\"", 0),
-            ("\"\\r\"", 0),
-            ("\"hello\"world\"", 6),
-            ("\"   hello\"", 0),
-            ("\"hello   \"   ", 3),
-            ("\"\\t\\n\\r\"", 0),
-            ("\"\"test\\\"", 6),
-            ("\"\\\\\\\\\"", 0),
-        ];
+    async fn test_ignore_string(source: &str, end_length: usize) {
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(source.len())
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
 
-        for input in inputs {
-            let source = input.0;
-            let end_length = input.1;
+        let mut decoder = Decoder::from_stream(source);
 
-            let source = stream::iter(source.as_bytes().iter().copied())
-                .chunks(source.len())
-                .map(Bytes::from)
-                .map(Result::<Bytes, Error>::Ok);
-
-            let mut decoder = Decoder::from_stream(source);
-
-            decoder.ignore_string().await.unwrap();
-            assert_eq!(decoder.buffer.len(), end_length);
-        }
+        decoder.ignore_string().await.unwrap();
+        assert_eq!(decoder.buffer.len(), end_length);
     }
 
+    #[test_case("0", 0; "zero")]
+    #[test_case("123", 0; "positive number")]
+    #[test_case("-123", 0; "negative number")]
+    #[test_case("123.45", 0; "positive float")]
+    #[test_case("-123.45", 0; "negative float")]
+    #[test_case("0.0", 0; "zero float")]
+    #[test_case("123, 45", 4; "parses only one number")]
     #[tokio::test]
-    async fn test_ignore_number() {
-        let inputs = [
-            ("0", 0),
-            ("123", 0),
-            ("-123", 0),
-            ("123.45", 0),
-            ("-123.45", 0),
-            ("0.0", 0),
-            ("123, 45", 4),
-        ];
+    async fn test_ignore_number(source: &str, end_length: usize) {
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(source.len())
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
 
-        for input in inputs {
-            let source = input.0;
-            let end_length = input.1;
+        let mut decoder = Decoder::from_stream(source);
 
-            let source = stream::iter(source.as_bytes().iter().copied())
-                .chunks(source.len())
-                .map(Bytes::from)
-                .map(Result::<Bytes, Error>::Ok);
-
-            let mut decoder = Decoder::from_stream(source);
-
-            // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
-            decoder.ignore_value().await.unwrap();
-            assert_eq!(decoder.buffer.len(), end_length);
-        }
+        // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
+        decoder.ignore_value().await.unwrap();
+        assert_eq!(decoder.buffer.len(), end_length);
     }
 
     #[test_case("[]", 0; "empty array")]
