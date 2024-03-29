@@ -772,8 +772,14 @@ impl<S: Read> Decoder<S> {
     #[async_recursion]
     async fn ignore_array(&mut self) -> Result<(), Error> {
         self.eat_char().await?;
+        self.expect_whitespace().await?;
+        if self.peek().await? == Some(b']') {
+            self.eat_char().await?;
+            return Ok(());
+        }
 
         loop {
+            self.ignore_value().await?;
             self.expect_whitespace().await?;
             match self.peek().await? {
                 Some(b',') => self.eat_char().await?,
@@ -781,18 +787,31 @@ impl<S: Read> Decoder<S> {
                     self.eat_char().await?;
                     return Ok(());
                 }
-                Some(_) => {}
+                Some(ch) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {ch}, expected , or ]"
+                    )))
+                }
                 None => return Err(Error::unexpected_end()),
             }
-            self.ignore_value().await?;
         }
     }
 
     #[async_recursion]
     async fn ignore_object(&mut self) -> Result<(), Error> {
         self.eat_char().await?; // b'{'
+        self.expect_whitespace().await?;
+        if self.peek().await? == Some(b'}') {
+            self.eat_char().await?;
+            return Ok(());
+        }
 
         loop {
+            self.expect_whitespace().await?;
+            self.ignore_string().await?; // key
+            self.expect_whitespace().await?;
+            self.ignore_exactly(":").await?;
+            self.ignore_value().await?;
             self.expect_whitespace().await?;
             match self.peek().await? {
                 Some(b'}') => {
@@ -800,15 +819,13 @@ impl<S: Read> Decoder<S> {
                     return Ok(());
                 }
                 Some(b',') => self.eat_char().await?,
-                Some(_) => {}
+                Some(ch) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {ch}, expected , or }}"
+                    )))
+                }
                 None => return Err(Error::unexpected_end()),
             }
-
-            self.expect_whitespace().await?;
-            self.ignore_string().await?; // key
-            self.expect_whitespace().await?;
-            self.ignore_exactly(":").await?;
-            self.ignore_value().await?;
         }
     }
 }
@@ -1272,10 +1289,10 @@ mod tests {
             .map(Bytes::from)
             .map(Result::<Bytes, Error>::Ok);
 
-        let mut decoder = Decoder::from_stream(source);
-
         // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
+        let mut decoder = Decoder::from_stream(source);
         let res = decoder.ignore_number().await;
+
         if let Ok(end_length) = expected {
             res.unwrap();
             assert_eq!(decoder.buffer.len(), end_length);
@@ -1284,24 +1301,30 @@ mod tests {
         }
     }
 
-    #[test_case("[]", 0; "empty array")]
-    #[test_case("[1]", 0; "single array")]
-    #[test_case("[ ] ", 1; "whitespace empty array")]
-    #[test_case("[ 1 ] ", 1; "whitespace single array")]
-    #[test_case("[1,2]", 0; "multi array")]
-    #[test_case("[],[]", 3; "ends correctly")]
-    #[test_case("[\"foo\",\"bar\"]", 0; "string array")]
+    #[test_case("[]", Ok(0); "empty array")]
+    #[test_case("[1]", Ok(0); "single array")]
+    #[test_case("[ ] ", Ok(1); "whitespace empty array")]
+    #[test_case("[ 1 ] ", Ok(1); "whitespace single array")]
+    #[test_case("[1,2]", Ok(0); "multi array")]
+    #[test_case("[],[]", Ok(3); "ends correctly")]
+    #[test_case("[\"foo\",\"bar\"]", Ok(0); "string array")]
+    #[test_case(r#""#, Err(Error::unexpected_end()); "unexpected end")]
+    #[test_case(r#"["test""test"]"#, Err(Error::invalid_utf8("invalid char 34, expected , or ]")); "no comma")]
     #[tokio::test]
-    async fn test_ignore_array(source: &str, end_length: usize) {
+    async fn test_ignore_array(source: &str, expected: Result<usize, Error>) {
+        let chunk_size = max(source.len(), 1);
         let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(source.len())
+            .chunks(chunk_size)
             .map(Bytes::from)
             .map(Result::<Bytes, Error>::Ok);
 
         let mut decoder = Decoder::from_stream(source);
+        let res = decoder.ignore_array().await;
 
-        decoder.ignore_array().await.unwrap();
-        assert_eq!(decoder.buffer.len(), end_length);
+        match expected {
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
+            Err(e) => assert_eq!(res.unwrap_err(), e),
+        }
     }
 
     #[test_case("{}", 0, None; "empty object")]
@@ -1314,6 +1337,7 @@ mod tests {
     #[test_case(r#"{ " k " : 1 } "#, 1, None; "whitespace single object")]
     #[test_case(r#"{"k""v"}"#, 4, Some(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
     #[test_case(r#"{"k","v"}"#, 5, Some(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
+    #[test_case(r#"{,"k":"v"}"#, 7, Some(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
     #[tokio::test]
     async fn test_ignore_object(source: &str, end_length: usize, expected_error: Option<Error>) {
         let source = stream::iter(source.as_bytes().iter().copied())
@@ -1322,12 +1346,11 @@ mod tests {
             .map(Result::<Bytes, Error>::Ok);
 
         let mut decoder = Decoder::from_stream(source);
-
         let res = decoder.ignore_object().await;
+
         match expected_error {
             Some(e) => assert_eq!(Err(e), res),
-            None => assert!(res.is_ok()),
+            None => assert_eq!(decoder.buffer.len(), end_length),
         }
-        assert_eq!(decoder.buffer.len(), end_length);
     }
 }
