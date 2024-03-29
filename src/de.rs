@@ -1327,19 +1327,19 @@ mod tests {
         }
     }
 
-    #[test_case("{}", 0, None; "empty object")]
-    #[test_case("{},{}", 3,  None; "ends correctly")]
-    #[test_case(r#"{"k":2, "k":3}"#, 0, None; "multi object")]
-    #[test_case(r#"{"k":1}"#, 0, None; "single object")]
-    #[test_case(r#"{"foo":"bar"}"#, 0, None; "string value")]
-    #[test_case(r#"{ } "#, 1, None; "whitespace empty object")]
-    #[test_case(r#"{"k" : 2 , " k " : 3 }"#, 0, None; "whitespace multi object")]
-    #[test_case(r#"{ " k " : 1 } "#, 1, None; "whitespace single object")]
-    #[test_case(r#"{"k""v"}"#, 4, Some(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
-    #[test_case(r#"{"k","v"}"#, 5, Some(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
-    #[test_case(r#"{,"k":"v"}"#, 7, Some(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
+    #[test_case("{}", Ok(0); "empty object")]
+    #[test_case("{},{}", Ok(3); "ends correctly")]
+    #[test_case(r#"{"k":2, "k":3}"#, Ok(0); "multi object")]
+    #[test_case(r#"{"k":1}"#, Ok(0); "single object")]
+    #[test_case(r#"{"foo":"bar"}"#, Ok(0); "string value")]
+    #[test_case(r#"{ } "#, Ok(1); "whitespace empty object")]
+    #[test_case(r#"{"k" : 2 , " k " : 3 }"#, Ok(0); "whitespace multi object")]
+    #[test_case(r#"{ " k " : 1 } "#, Ok(1); "whitespace single object")]
+    #[test_case(r#"{"k""v"}"#, Err(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
+    #[test_case(r#"{"k","v"}"#, Err(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
+    #[test_case(r#"{,"k":"v"}"#, Err(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
     #[tokio::test]
-    async fn test_ignore_object(source: &str, end_length: usize, expected_error: Option<Error>) {
+    async fn test_ignore_object(source: &str, expected: Result<usize, Error>) {
         let source = stream::iter(source.as_bytes().iter().copied())
             .chunks(source.len())
             .map(Bytes::from)
@@ -1348,9 +1348,9 @@ mod tests {
         let mut decoder = Decoder::from_stream(source);
         let res = decoder.ignore_object().await;
 
-        match expected_error {
-            Some(e) => assert_eq!(Err(e), res),
-            None => assert_eq!(decoder.buffer.len(), end_length),
+        match expected {
+            Err(e) => assert_eq!(Err(e), res),
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
         }
     }
 }
