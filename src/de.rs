@@ -92,6 +92,7 @@ impl<R: AsyncRead> From<R> for SourceReader<R> {
 }
 
 /// An error encountered while decoding a JSON stream.
+#[derive(PartialEq)]
 pub struct Error {
     message: String,
 }
@@ -417,7 +418,10 @@ impl<S: Read> Decoder<S> {
             self.buffer().await?;
         }
 
-        Ok(Some(self.buffer.remove(0)))
+        match self.buffer.len() {
+            0 => Ok(None),
+            _ => Ok(Some(self.buffer.remove(0))),
+        }
     }
 
     async fn eat_char(&mut self) -> Result<(), Error> {
@@ -1158,6 +1162,8 @@ fn decode_hex_val(val: u8) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::max;
+
     use futures::stream;
     use test_case::test_case;
 
@@ -1202,6 +1208,8 @@ mod tests {
         assert_eq!(decoder.buffer.len(), chars_left);
     }
 
+    #[test_case(r#""""#, 0; "empty string")]
+    #[test_case(r#""","#, 1; "empty string then leave char")]
     #[test_case("\"foo\"bar", 3; "ends correctly")]
     #[test_case("\"test\"", 0; "string value")]
     #[test_case("\"\"", 0; "empty")]
@@ -1211,7 +1219,7 @@ mod tests {
     #[test_case("\"hello   \"   ", 3; "whitespace after")]
     #[test_case("\"\\t\\n\\r\"", 0; "whitespace chars")]
     #[test_case("\"\"test\\\"", 6; "chars after empty string")]
-    #[test_case("\"\\\\\\\\\"", 0; "backslashs")]
+    #[test_case("\"\\\\\\\\\"", 0; "backslashes")]
     #[tokio::test]
     async fn test_ignore_string(source: &str, end_length: usize) {
         let source = stream::iter(source.as_bytes().iter().copied())
@@ -1225,25 +1233,55 @@ mod tests {
         assert_eq!(decoder.buffer.len(), end_length);
     }
 
-    #[test_case("0", 0; "zero")]
-    #[test_case("123", 0; "positive number")]
-    #[test_case("-123", 0; "negative number")]
-    #[test_case("123.45", 0; "positive float")]
-    #[test_case("-123.45", 0; "negative float")]
-    #[test_case("0.0", 0; "zero float")]
-    #[test_case("123, 45", 4; "parses only one number")]
+    #[test_case("-123", Ok(0); "negative number")]
+    #[test_case("-123.45", Ok(0); "negative float")]
+    #[test_case("abc", Err(Error::invalid_utf8("unexpected token ignoring value: 97")); "non number")]
+    #[test_case("", Ok(0); "empty source")]
     #[tokio::test]
-    async fn test_ignore_number(source: &str, end_length: usize) {
+    async fn test_ignore_value(source: &str, expected: Result<usize, Error>) {
+        let chunk_size = max(source.len(), 1);
         let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(source.len())
+            .chunks(chunk_size)
             .map(Bytes::from)
             .map(Result::<Bytes, Error>::Ok);
 
         let mut decoder = Decoder::from_stream(source);
 
         // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
-        decoder.ignore_value().await.unwrap();
-        assert_eq!(decoder.buffer.len(), end_length);
+        let res = decoder.ignore_value().await;
+        if let Ok(end_length) = expected {
+            res.unwrap();
+            assert_eq!(decoder.buffer.len(), end_length);
+        } else {
+            assert_eq!(res.unwrap_err(), expected.unwrap_err())
+        }
+    }
+
+    #[test_case("0", Ok(0); "zero")]
+    #[test_case("123", Ok(0); "positive number")]
+    #[test_case("123.45", Ok(0); "positive float")]
+    #[test_case("0.0", Ok(0); "zero float")]
+    #[test_case("123, 45", Ok(4); "parses only one number")]
+    #[test_case("abc", Err(Error::invalid_utf8("invalid number: 97")); "unexpected token")]
+    #[test_case("", Err(Error::unexpected_end()); "unexpected end")]
+    #[tokio::test]
+    async fn test_ignore_number(source: &str, expected: Result<usize, Error>) {
+        let chunk_size = max(source.len(), 1);
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(chunk_size)
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
+
+        let mut decoder = Decoder::from_stream(source);
+
+        // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
+        let res = decoder.ignore_number().await;
+        if let Ok(end_length) = expected {
+            res.unwrap();
+            assert_eq!(decoder.buffer.len(), end_length);
+        } else {
+            assert_eq!(res.unwrap_err(), expected.unwrap_err())
+        }
     }
 
     #[test_case("[]", 0; "empty array")]
@@ -1266,16 +1304,18 @@ mod tests {
         assert_eq!(decoder.buffer.len(), end_length);
     }
 
-    #[test_case("{}", 0; "empty object")]
-    #[test_case("{},{}", 3; "ends correctly")]
-    #[test_case("{\"k\":2, \"k\":3}", 0; "multi object")]
-    #[test_case("{\"k\":1}", 0; "single object")]
-    #[test_case("{\"foo\":\"bar\"}", 0; "string value")]
-    #[test_case("{ } ", 1; "whitespace empty object")]
-    #[test_case("{\"k\" : 2 , \" k \" : 3 }", 0; "whitespace multi object")]
-    #[test_case("{ \" k \" : 1 } ", 1; "whitespace single object")]
+    #[test_case("{}", 0, None; "empty object")]
+    #[test_case("{},{}", 3,  None; "ends correctly")]
+    #[test_case(r#"{"k":2, "k":3}"#, 0, None; "multi object")]
+    #[test_case(r#"{"k":1}"#, 0, None; "single object")]
+    #[test_case(r#"{"foo":"bar"}"#, 0, None; "string value")]
+    #[test_case(r#"{ } "#, 1, None; "whitespace empty object")]
+    #[test_case(r#"{"k" : 2 , " k " : 3 }"#, 0, None; "whitespace multi object")]
+    #[test_case(r#"{ " k " : 1 } "#, 1, None; "whitespace single object")]
+    #[test_case(r#"{"k""v"}"#, 4, Some(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
+    #[test_case(r#"{"k","v"}"#, 5, Some(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
     #[tokio::test]
-    async fn test_ignore_object(source: &str, end_length: usize) {
+    async fn test_ignore_object(source: &str, end_length: usize, expected_error: Option<Error>) {
         let source = stream::iter(source.as_bytes().iter().copied())
             .chunks(source.len())
             .map(Bytes::from)
@@ -1283,7 +1323,11 @@ mod tests {
 
         let mut decoder = Decoder::from_stream(source);
 
-        decoder.ignore_object().await.unwrap();
+        let res = decoder.ignore_object().await;
+        match expected_error {
+            Some(e) => assert_eq!(Err(e), res),
+            None => assert!(res.is_ok()),
+        }
         assert_eq!(decoder.buffer.len(), end_length);
     }
 }
