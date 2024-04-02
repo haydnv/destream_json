@@ -745,7 +745,7 @@ impl<S: Read> Decoder<S> {
     }
 
     async fn ignore_exponent(&mut self) -> Result<(), Error> {
-        self.next_char().await?;
+        self.eat_char().await?;
 
         if let Some(b'+' | b'-') = self.peek().await? {
             self.eat_char().await?;
@@ -1247,7 +1247,9 @@ mod tests {
     #[test_case("\"\"test\\\"", Ok(6); "chars after empty string")]
     #[test_case("\"\\\\\\\\\"", Ok(0); "backslashes")]
     #[test_case("", Err(Error::unexpected_end()); "eof")]
-    #[test_case(r#""a"#, Err(Error::unexpected_end()); "unfinished string")]
+    #[test_case(r#""a"#, Err(Error::unexpected_end()); "unterminatedstring")]
+    #[test_case("\"\x01\"", Err(Error::invalid_utf8("invalid control character in string: 1")); "invalid control char")]
+    #[test_case(r#""\u00""#, Err(Error::invalid_utf8("invalid escape decoding hex escape")); "unfinished hex char")]
     #[test_case(
         r#""\x01""#,
         Err(Error::invalid_utf8("invalid escape character in string"))
@@ -1284,12 +1286,19 @@ mod tests {
     }
 
     #[test_case("0", Ok(0); "zero")]
+    #[test_case("00", Err(Error::invalid_utf8("invalid number, two leading zeroes")); "double zero")]
     #[test_case("123", Ok(0); "positive number")]
     #[test_case("123.45", Ok(0); "positive float")]
     #[test_case("0.0", Ok(0); "zero float")]
     #[test_case("123, 45", Ok(4); "parses only one number")]
+    #[test_case("1e30, 45", Ok(4); "parses exponent")]
+    #[test_case("1.2e3, 45", Ok(4); "parses decimal exponent")]
     #[test_case("abc", Err(Error::invalid_utf8("invalid number: 97")); "unexpected token")]
     #[test_case("", Err(Error::unexpected_end()); "unexpected end")]
+    #[test_case("1.", Err(Error::invalid_utf8("invalid number, expected at least one digit after decimal")); "expected a number after the decimal")]
+    #[test_case("1.1e-1", Ok(0); "negative exponent")]
+    #[test_case("1.1e-a", Err(Error::invalid_utf8("expected a digit to follow the exponent, found 97")); "invalid exponent")]
+    #[test_case("1.1e", Err(Error::unexpected_end()); "unterminated number")]
     #[tokio::test]
     async fn test_ignore_number(source: &str, expected: Result<usize, Error>) {
         let mut decoder = test_decoder(source);
@@ -1334,6 +1343,7 @@ mod tests {
     #[test_case(r#"{"k""v"}"#, Err(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
     #[test_case(r#"{"k","v"}"#, Err(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
     #[test_case(r#"{,"k":"v"}"#, Err(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
+    #[test_case(r#"{"k":"v"asdf}"#, Err(Error::invalid_utf8("invalid char 97, expected , or }")); "value when expecting comma")]
     #[tokio::test]
     async fn test_ignore_object(source: &str, expected: Result<usize, Error>) {
         let mut decoder = test_decoder(source);
