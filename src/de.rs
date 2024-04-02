@@ -1207,6 +1207,30 @@ mod tests {
         }
     }
 
+    fn test_decoder(
+        source: &str,
+    ) -> Decoder<
+        SourceStream<
+            futures::stream::Map<
+                futures::stream::Map<
+                    futures::stream::Chunks<
+                        futures::stream::Iter<std::iter::Copied<std::slice::Iter<'_, u8>>>,
+                    >,
+                    fn(Vec<u8>) -> bytes::Bytes,
+                >,
+                fn(bytes::Bytes) -> Result<bytes::Bytes, Error>,
+            >,
+        >,
+    > {
+        let chunk_size = max(source.len(), 1);
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(chunk_size)
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
+
+        Decoder::from_stream(source)
+    }
+
     /// ignore_exactly takes a vector of bytes, and consumes exactly those characters.
     #[test_case("foo", "foo", true, 0; "ignore foo")]
     #[test_case("foobar", "foo", true, 3; "ignore foo not bar")]
@@ -1283,14 +1307,7 @@ mod tests {
     #[test_case("", Err(Error::unexpected_end()); "unexpected end")]
     #[tokio::test]
     async fn test_ignore_number(source: &str, expected: Result<usize, Error>) {
-        let chunk_size = max(source.len(), 1);
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(chunk_size)
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
-        let mut decoder = Decoder::from_stream(source);
+        let decoder = test_decoder(source);
         let res = decoder.ignore_number().await;
 
         if let Ok(end_length) = expected {
