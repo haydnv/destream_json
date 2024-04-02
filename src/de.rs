@@ -6,7 +6,6 @@ use std::str::FromStr;
 
 use async_recursion::async_recursion;
 use async_trait::async_trait;
-
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
