@@ -1223,6 +1223,8 @@ mod tests {
     #[test_case("foo", "foo", true, 0; "ignore foo")]
     #[test_case("foobar", "foo", true, 3; "ignore foo not bar")]
     #[test_case("foobar", "bar", false, 6; "wrong expected str")]
+    #[test_case("", "", true, 0; "empty good")]
+    #[test_case("", "a", false, 0; "empty bad")]
     #[tokio::test]
     async fn test_ignore_exactly(source: &str, to_ignore: &str, success: bool, chars_left: usize) {
         let mut decoder = test_decoder(source);
@@ -1232,24 +1234,34 @@ mod tests {
         assert_eq!(decoder.buffer.len(), chars_left);
     }
 
-    #[test_case(r#""""#, 0; "empty string")]
-    #[test_case(r#""","#, 1; "empty string then leave char")]
-    #[test_case("\"foo\"bar", 3; "ends correctly")]
-    #[test_case("\"test\"", 0; "string value")]
-    #[test_case("\"\"", 0; "empty")]
-    #[test_case("\"\\r\"", 0; "carriage return")]
-    #[test_case("\"hello\"world\"", 6; "multiple quotes")]
-    #[test_case("\"   hello\"", 0; "whitespace before")]
-    #[test_case("\"hello   \"   ", 3; "whitespace after")]
-    #[test_case("\"\\t\\n\\r\"", 0; "whitespace chars")]
-    #[test_case("\"\"test\\\"", 6; "chars after empty string")]
-    #[test_case("\"\\\\\\\\\"", 0; "backslashes")]
+    #[test_case(r#""""#, Ok(0); "empty string")]
+    #[test_case(r#""","#, Ok(1); "empty string then leave char")]
+    #[test_case("\"foo\"bar", Ok(3); "ends correctly")]
+    #[test_case("\"test\"", Ok(0); "string value")]
+    #[test_case("\"\"", Ok(0); "empty")]
+    #[test_case("\"\\r\"", Ok(0); "carriage return")]
+    #[test_case("\"hello\"world\"", Ok(6); "multiple quotes")]
+    #[test_case("\"   hello\"", Ok(0); "whitespace before")]
+    #[test_case("\"hello   \"   ", Ok(3); "whitespace after")]
+    #[test_case("\"\\t\\n\\r\"", Ok(0); "whitespace chars")]
+    #[test_case("\"\"test\\\"", Ok(6); "chars after empty string")]
+    #[test_case("\"\\\\\\\\\"", Ok(0); "backslashes")]
+    #[test_case("", Err(Error::unexpected_end()); "eof")]
+    #[test_case(r#""a"#, Err(Error::unexpected_end()); "unfinished string")]
+    #[test_case(
+        r#""\x01""#,
+        Err(Error::invalid_utf8("invalid escape character in string"))
+    )]
     #[tokio::test]
-    async fn test_ignore_string(source: &str, end_length: usize) {
+    async fn test_ignore_string(source: &str, expected: Result<usize, Error>) {
         let mut decoder = test_decoder(source);
 
-        decoder.ignore_string().await.unwrap();
-        assert_eq!(decoder.buffer.len(), end_length);
+        let res = decoder.ignore_string().await;
+
+        match expected {
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
+            Err(e) => assert_eq!(Err(e), res),
+        }
     }
 
     #[test_case("-123", Ok(0); "negative number")]
