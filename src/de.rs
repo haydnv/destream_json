@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 
+use async_recursion::async_recursion;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
@@ -90,6 +91,7 @@ impl<R: AsyncRead> From<R> for SourceReader<R> {
 }
 
 /// An error encountered while decoding a JSON stream.
+#[derive(PartialEq)]
 pub struct Error {
     message: String,
 }
@@ -398,6 +400,45 @@ impl<S: Read> Decoder<S> {
         Ok(i)
     }
 
+    async fn peek(&mut self) -> Result<Option<u8>, Error> {
+        while self.buffer.is_empty() && !self.source.is_terminated() {
+            self.buffer().await?;
+        }
+
+        if self.buffer.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(self.buffer[0]))
+        }
+    }
+
+    async fn next_char(&mut self) -> Result<Option<u8>, Error> {
+        while self.buffer.is_empty() && !self.source.is_terminated() {
+            self.buffer().await?;
+        }
+
+        match self.buffer.len() {
+            0 => Ok(None),
+            _ => Ok(Some(self.buffer.remove(0))),
+        }
+    }
+
+    async fn eat_char(&mut self) -> Result<(), Error> {
+        self.next_char().await?;
+        Ok(())
+    }
+
+    async fn next_or_eof(&mut self) -> Result<u8, Error> {
+        while self.buffer.is_empty() && !self.source.is_terminated() {
+            self.buffer().await?;
+        }
+        if self.buffer.is_empty() {
+            Err(Error::unexpected_end())
+        } else {
+            Ok(self.buffer.remove(0))
+        }
+    }
+
     async fn decode_number<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Error> {
         let mut i = 0;
         loop {
@@ -452,21 +493,102 @@ impl<S: Read> Decoder<S> {
             self.buffer().await?;
         }
 
-        if self.buffer.is_empty() {
-            Ok(())
-        } else {
-            if self.buffer.starts_with(QUOTE) {
-                self.parse_string().await?;
-            } else if self.numeric.contains(&self.buffer[0]) {
-                self.parse_number::<f64>().await?;
-            } else if self.buffer[0] == b'n' {
-                self.parse_unit().await?;
-            } else {
-                self.parse_bool().await?;
+        if !self.buffer.is_empty() {
+            // Determine the type of JSON value based on the first character in the buffer
+            match self.buffer[0] {
+                b'"' => self.ignore_string().await?,
+                b'-' => {
+                    self.eat_char().await?;
+                    self.ignore_number().await?;
+                }
+                b'0'..=b'9' => self.ignore_number().await?,
+                b't' => self.ignore_exactly("true").await?,
+                b'f' => self.ignore_exactly("false").await?,
+                b'n' => self.ignore_exactly("null").await?,
+                b'[' => self.ignore_array().await?,
+                b'{' => self.ignore_object().await?,
+                // If the first character doesn't match any JSON value type, return an error
+                _ => {
+                    return Err(Error::invalid_utf8(format!(
+                        "unexpected token ignoring value: {}",
+                        self.buffer[0]
+                    )))
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn ignore_string(&mut self) -> Result<(), Error> {
+        // eat the first char, which is a quote
+        self.eat_char().await?;
+        loop {
+            if self.buffer.is_empty() {
+                self.buffer().await?;
             }
 
-            Ok(())
+            if self.buffer.is_empty() && self.source.is_terminated() {
+                return Err(Error::unexpected_end());
+            }
+
+            let ch = self.next_or_eof().await?;
+            if !ESCAPE_CHARS[ch as usize] {
+                continue;
+            }
+
+            match ch {
+                b'"' => {
+                    return Ok(());
+                }
+                b'\\' => {
+                    self.ignore_escaped_char().await?;
+                }
+                ch => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid control character in string: {ch}"
+                    )));
+                }
+            }
         }
+    }
+
+    /// Parses a JSON escape sequence and discards the value. Assumes the previous
+    /// byte read was a backslash.
+    async fn ignore_escaped_char(&mut self) -> Result<(), Error> {
+        let ch = self.next_or_eof().await?;
+
+        match ch {
+            b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {}
+            b'u' => {
+                // At this point we don't care if the codepoint is valid. We just
+                // want to consume it. We don't actually know what is valid or not
+                // at this point, because that depends on if this string will
+                // ultimately be parsed into a string or a byte buffer in the "real"
+                // parse.
+
+                self.decode_hex_escape().await?;
+            }
+            _ => {
+                return Err(Error::invalid_utf8("invalid escape character in string"));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn decode_hex_escape(&mut self) -> Result<u16, Error> {
+        let mut n = 0;
+        for _ in 0..4 {
+            let ch = decode_hex_val(self.next_or_eof().await?);
+            match ch {
+                None => return Err(Error::invalid_utf8("invalid escape decoding hex escape")),
+                Some(val) => {
+                    n = (n << 4) + val;
+                }
+            }
+        }
+        Ok(n)
     }
 
     async fn maybe_delimiter(&mut self, delimiter: &'static [u8]) -> Result<bool, Error> {
@@ -554,6 +676,155 @@ impl<S: Read> Decoder<S> {
                 String::from_utf8(self.buffer[..i].to_vec()).map_err(Error::invalid_utf8)?;
 
             Err(de::Error::invalid_type(as_str, "null"))
+        }
+    }
+
+    async fn ignore_exactly(&mut self, s: &str) -> Result<(), Error> {
+        for ch in s.as_bytes() {
+            match self.peek().await?.as_ref() {
+                None => return Err(Error::unexpected_end()),
+                Some(next) if next == ch => self.eat_char().await?,
+                Some(next) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {next}, expected {ch}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn ignore_number(&mut self) -> Result<(), Error> {
+        let ch = self.next_char().await?;
+        match ch {
+            Some(b'0') => {
+                // There cannot be any leading zeroes.
+                // If there is a leading '0', it cannot be followed by more digits.
+                if let Some(b'0'..=b'9') = self.peek().await? {
+                    return Err(Error::invalid_utf8("invalid number, two leading zeroes"));
+                }
+            }
+            Some(b'1'..=b'9') => {
+                while let Some(b'0'..=b'9') = self.peek().await? {
+                    self.eat_char().await?;
+                }
+            }
+            Some(ch) => {
+                return Err(Error::invalid_utf8(format!("invalid number: {}", ch)));
+            }
+            None => return Err(Error::unexpected_end()),
+        }
+
+        match self.peek().await? {
+            Some(b'.') => self.ignore_decimal().await,
+            Some(b'e' | b'E') => self.ignore_exponent().await,
+            _ => Ok(()),
+        }
+    }
+
+    async fn ignore_decimal(&mut self) -> Result<(), Error> {
+        self.eat_char().await?;
+
+        let mut at_least_one_digit = false;
+        while let Some(b'0'..=b'9') = self.peek().await? {
+            self.eat_char().await?;
+            at_least_one_digit = true;
+        }
+
+        if !at_least_one_digit {
+            return Err(Error::invalid_utf8(
+                "invalid number, expected at least one digit after decimal",
+            ));
+        }
+
+        match self.peek().await? {
+            Some(b'e' | b'E') => self.ignore_exponent().await,
+            _ => Ok(()),
+        }
+    }
+
+    async fn ignore_exponent(&mut self) -> Result<(), Error> {
+        self.eat_char().await?;
+
+        if let Some(b'+' | b'-') = self.peek().await? {
+            self.eat_char().await?;
+        }
+
+        // Make sure a digit follows the exponent place.
+        match self.next_char().await? {
+            Some(b'0'..=b'9') => {}
+            Some(ch) => {
+                return Err(Error::invalid_utf8(format!(
+                    "expected a digit to follow the exponent, found {ch}"
+                )));
+            }
+            None => return Err(Error::unexpected_end()),
+        }
+
+        while let Some(b'0'..=b'9') = self.peek().await? {
+            self.eat_char().await?;
+        }
+
+        Ok(())
+    }
+
+    #[async_recursion]
+    async fn ignore_array(&mut self) -> Result<(), Error> {
+        self.eat_char().await?;
+        self.expect_whitespace().await?;
+        if self.peek().await? == Some(b']') {
+            self.eat_char().await?;
+            return Ok(());
+        }
+
+        loop {
+            self.ignore_value().await?;
+            self.expect_whitespace().await?;
+            match self.peek().await? {
+                Some(b',') => self.eat_char().await?,
+                Some(b']') => {
+                    self.eat_char().await?;
+                    return Ok(());
+                }
+                Some(ch) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {ch}, expected , or ]"
+                    )))
+                }
+                None => return Err(Error::unexpected_end()),
+            }
+        }
+    }
+
+    #[async_recursion]
+    async fn ignore_object(&mut self) -> Result<(), Error> {
+        self.eat_char().await?; // b'{'
+        self.expect_whitespace().await?;
+        if self.peek().await? == Some(b'}') {
+            self.eat_char().await?;
+            return Ok(());
+        }
+
+        loop {
+            self.expect_whitespace().await?;
+            self.ignore_string().await?; // key
+            self.expect_whitespace().await?;
+            self.ignore_exactly(":").await?;
+            self.ignore_value().await?;
+            self.expect_whitespace().await?;
+            match self.peek().await? {
+                Some(b'}') => {
+                    self.eat_char().await?;
+                    return Ok(());
+                }
+                Some(b',') => self.eat_char().await?,
+                Some(ch) => {
+                    return Err(Error::invalid_utf8(format!(
+                        "invalid char {ch}, expected , or }}"
+                    )))
+                }
+                None => return Err(Error::unexpected_end()),
+            }
         }
     }
 }
@@ -894,4 +1165,192 @@ pub async fn read_from<S: AsyncReadExt + Send + Unpin, T: FromStream>(
     source: S,
 ) -> Result<T, Error> {
     T::from_stream(context, &mut Decoder::from(SourceReader::from(source))).await
+}
+
+fn decode_hex_val(val: u8) -> Option<u16> {
+    let n = HEX[val as usize] as u16;
+    if n == 255 {
+        None
+    } else {
+        Some(n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::max;
+
+    use futures::stream;
+    use test_case::test_case;
+
+    use super::*;
+
+    /// next_or_eof should return the next char in the buffer/stream, or
+    /// if we've hit the EOF, throw an error.
+    #[tokio::test]
+    async fn test_next_or_eof() {
+        let s = b"bar";
+        for num_chunks in (1..s.len()).rev() {
+            let source = stream::iter(s.iter().copied())
+                .chunks(num_chunks)
+                .map(Bytes::from)
+                .map(Result::<Bytes, Error>::Ok);
+
+            let mut decoder = Decoder::from_stream(source);
+            for expected in s {
+                let actual = decoder.next_or_eof().await.unwrap();
+                assert_eq!(&actual, expected);
+            }
+            let res = decoder.next_or_eof().await;
+            assert!(res.is_err());
+        }
+    }
+
+    fn test_decoder(
+        source: &str,
+    ) -> Decoder<SourceStream<impl Stream<Item = Result<Bytes, Error>> + '_>> {
+        let chunk_size = max(source.len(), 1);
+        let source = stream::iter(source.as_bytes().iter().copied())
+            .chunks(chunk_size)
+            .map(Bytes::from)
+            .map(Result::<Bytes, Error>::Ok);
+
+        Decoder::from_stream(source)
+    }
+
+    /// ignore_exactly takes a vector of bytes, and consumes exactly those characters.
+    #[test_case("foo", "foo", true, 0; "ignore foo")]
+    #[test_case("foobar", "foo", true, 3; "ignore foo not bar")]
+    #[test_case("foobar", "bar", false, 6; "wrong expected str")]
+    #[test_case("", "", true, 0; "empty good")]
+    #[test_case("", "a", false, 0; "empty bad")]
+    #[tokio::test]
+    async fn test_ignore_exactly(source: &str, to_ignore: &str, success: bool, chars_left: usize) {
+        let mut decoder = test_decoder(source);
+        let res = decoder.ignore_exactly(to_ignore).await;
+
+        assert_eq!(res.is_ok(), success);
+        assert_eq!(decoder.buffer.len(), chars_left);
+    }
+
+    #[test_case(r#""""#, Ok(0); "empty string")]
+    #[test_case(r#""","#, Ok(1); "empty string then leave char")]
+    #[test_case("\"foo\"bar", Ok(3); "ends correctly")]
+    #[test_case("\"test\"", Ok(0); "string value")]
+    #[test_case("\"\"", Ok(0); "empty")]
+    #[test_case("\"\\r\"", Ok(0); "carriage return")]
+    #[test_case("\"hello\"world\"", Ok(6); "multiple quotes")]
+    #[test_case("\"   hello\"", Ok(0); "whitespace before")]
+    #[test_case("\"hello   \"   ", Ok(3); "whitespace after")]
+    #[test_case("\"\\t\\n\\r\"", Ok(0); "whitespace chars")]
+    #[test_case("\"\"test\\\"", Ok(6); "chars after empty string")]
+    #[test_case("\"\\\\\\\\\"", Ok(0); "backslashes")]
+    #[test_case("", Err(Error::unexpected_end()); "eof")]
+    #[test_case(r#""a"#, Err(Error::unexpected_end()); "unterminatedstring")]
+    #[test_case("\"\x01\"", Err(Error::invalid_utf8("invalid control character in string: 1")); "invalid control char")]
+    #[test_case(r#""\u00""#, Err(Error::invalid_utf8("invalid escape decoding hex escape")); "unfinished hex char")]
+    #[test_case(
+        r#""\x01""#,
+        Err(Error::invalid_utf8("invalid escape character in string"))
+    )]
+    #[tokio::test]
+    async fn test_ignore_string(source: &str, expected: Result<usize, Error>) {
+        let mut decoder = test_decoder(source);
+
+        let res = decoder.ignore_string().await;
+
+        match expected {
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
+            Err(e) => assert_eq!(Err(e), res),
+        }
+    }
+
+    #[test_case("-123", Ok(0); "negative number")]
+    #[test_case("-123.45", Ok(0); "negative float")]
+    #[test_case("abc", Err(Error::invalid_utf8("unexpected token ignoring value: 97")); "non number")]
+    #[test_case("", Ok(0); "empty source")]
+    #[tokio::test]
+    async fn test_ignore_value(source: &str, expected: Result<usize, Error>) {
+        let mut decoder = test_decoder(source);
+
+        // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
+        let res = decoder.ignore_value().await;
+
+        if let Ok(end_length) = expected {
+            res.unwrap();
+            assert_eq!(decoder.buffer.len(), end_length);
+        } else {
+            assert_eq!(res.unwrap_err(), expected.unwrap_err())
+        }
+    }
+
+    #[test_case("0", Ok(0); "zero")]
+    #[test_case("00", Err(Error::invalid_utf8("invalid number, two leading zeroes")); "double zero")]
+    #[test_case("123", Ok(0); "positive number")]
+    #[test_case("123.45", Ok(0); "positive float")]
+    #[test_case("0.0", Ok(0); "zero float")]
+    #[test_case("123, 45", Ok(4); "parses only one number")]
+    #[test_case("1e30, 45", Ok(4); "parses exponent")]
+    #[test_case("1.2e3, 45", Ok(4); "parses decimal exponent")]
+    #[test_case("abc", Err(Error::invalid_utf8("invalid number: 97")); "unexpected token")]
+    #[test_case("", Err(Error::unexpected_end()); "unexpected end")]
+    #[test_case("1.", Err(Error::invalid_utf8("invalid number, expected at least one digit after decimal")); "expected a number after the decimal")]
+    #[test_case("1.1e-1", Ok(0); "negative exponent")]
+    #[test_case("1.1e-a", Err(Error::invalid_utf8("expected a digit to follow the exponent, found 97")); "invalid exponent")]
+    #[test_case("1.1e", Err(Error::unexpected_end()); "unterminated number")]
+    #[tokio::test]
+    async fn test_ignore_number(source: &str, expected: Result<usize, Error>) {
+        let mut decoder = test_decoder(source);
+        let res = decoder.ignore_number().await;
+
+        if let Ok(end_length) = expected {
+            res.unwrap();
+            assert_eq!(decoder.buffer.len(), end_length);
+        } else {
+            assert_eq!(res.unwrap_err(), expected.unwrap_err())
+        }
+    }
+
+    #[test_case("[]", Ok(0); "empty array")]
+    #[test_case("[1]", Ok(0); "single array")]
+    #[test_case("[ ] ", Ok(1); "whitespace empty array")]
+    #[test_case("[ 1 ] ", Ok(1); "whitespace single array")]
+    #[test_case("[1,2]", Ok(0); "multi array")]
+    #[test_case("[],[]", Ok(3); "ends correctly")]
+    #[test_case("[\"foo\",\"bar\"]", Ok(0); "string array")]
+    #[test_case(r#""#, Err(Error::unexpected_end()); "unexpected end")]
+    #[test_case(r#"["test""test"]"#, Err(Error::invalid_utf8("invalid char 34, expected , or ]")); "no comma")]
+    #[tokio::test]
+    async fn test_ignore_array(source: &str, expected: Result<usize, Error>) {
+        let mut decoder = test_decoder(source);
+        let res = decoder.ignore_array().await;
+
+        match expected {
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
+            Err(e) => assert_eq!(res.unwrap_err(), e),
+        }
+    }
+
+    #[test_case("{}", Ok(0); "empty object")]
+    #[test_case("{},{}", Ok(3); "ends correctly")]
+    #[test_case(r#"{"k":2, "k":3}"#, Ok(0); "multi object")]
+    #[test_case(r#"{"k":1}"#, Ok(0); "single object")]
+    #[test_case(r#"{"foo":"bar"}"#, Ok(0); "string value")]
+    #[test_case(r#"{ } "#, Ok(1); "whitespace empty object")]
+    #[test_case(r#"{"k" : 2 , " k " : 3 }"#, Ok(0); "whitespace multi object")]
+    #[test_case(r#"{ " k " : 1 } "#, Ok(1); "whitespace single object")]
+    #[test_case(r#"{"k""v"}"#, Err(Error::invalid_utf8("invalid char 34, expected 58")); "missing colon")]
+    #[test_case(r#"{"k","v"}"#, Err(Error::invalid_utf8("invalid char 44, expected 58")); "comma when expecting colon")]
+    #[test_case(r#"{,"k":"v"}"#, Err(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
+    #[test_case(r#"{"k":"v"asdf}"#, Err(Error::invalid_utf8("invalid char 97, expected , or }")); "value when expecting comma")]
+    #[tokio::test]
+    async fn test_ignore_object(source: &str, expected: Result<usize, Error>) {
+        let mut decoder = test_decoder(source);
+        let res = decoder.ignore_object().await;
+
+        match expected {
+            Err(e) => assert_eq!(Err(e), res),
+            Ok(end_length) => assert_eq!(decoder.buffer.len(), end_length),
+        }
+    }
 }

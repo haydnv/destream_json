@@ -1,6 +1,6 @@
 [package]
 name = "destream_json"
-version = "0.12.1"
+version = "0.12.2"
 authors = ["code@tinychain.net"]
 edition = "2021"
 license = "Apache-2.0"
@@ -18,6 +18,7 @@ value = ["number-general/stream"]
 all = ["tokio-io", "value"]
 
 [dependencies]
+async-recursion = "1.1"
 async-trait = "0.1"
 base64 = "0.22"
 bytes = "1.5"
@@ -33,3 +34,4 @@ number-general = { version = "0.11", features=["stream"] }
 tokio = { version = "1.35", features = ["fs", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tokio-test = "0.4"
+test-case = "3.3.1"
