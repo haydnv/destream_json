@@ -1209,19 +1209,7 @@ mod tests {
 
     fn test_decoder(
         source: &str,
-    ) -> Decoder<
-        SourceStream<
-            futures::stream::Map<
-                futures::stream::Map<
-                    futures::stream::Chunks<
-                        futures::stream::Iter<std::iter::Copied<std::slice::Iter<'_, u8>>>,
-                    >,
-                    fn(Vec<u8>) -> bytes::Bytes,
-                >,
-                fn(bytes::Bytes) -> Result<bytes::Bytes, Error>,
-            >,
-        >,
-    > {
+    ) -> Decoder<SourceStream<impl Stream<Item = Result<Bytes, Error>> + '_>> {
         let chunk_size = max(source.len(), 1);
         let source = stream::iter(source.as_bytes().iter().copied())
             .chunks(chunk_size)
@@ -1237,14 +1225,9 @@ mod tests {
     #[test_case("foobar", "bar", false, 6; "wrong expected str")]
     #[tokio::test]
     async fn test_ignore_exactly(source: &str, to_ignore: &str, success: bool, chars_left: usize) {
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(source.len())
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        let mut decoder = Decoder::from_stream(source);
-
+        let mut decoder = test_decoder(source);
         let res = decoder.ignore_exactly(to_ignore).await;
+
         assert_eq!(res.is_ok(), success);
         assert_eq!(decoder.buffer.len(), chars_left);
     }
@@ -1263,12 +1246,7 @@ mod tests {
     #[test_case("\"\\\\\\\\\"", 0; "backslashes")]
     #[tokio::test]
     async fn test_ignore_string(source: &str, end_length: usize) {
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(source.len())
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        let mut decoder = Decoder::from_stream(source);
+        let mut decoder = test_decoder(source);
 
         decoder.ignore_string().await.unwrap();
         assert_eq!(decoder.buffer.len(), end_length);
@@ -1280,16 +1258,11 @@ mod tests {
     #[test_case("", Ok(0); "empty source")]
     #[tokio::test]
     async fn test_ignore_value(source: &str, expected: Result<usize, Error>) {
-        let chunk_size = max(source.len(), 1);
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(chunk_size)
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        let mut decoder = Decoder::from_stream(source);
+        let mut decoder = test_decoder(source);
 
         // `ignore_number` only works on positive numbers.  `ignore_value` will eat that b'-'
         let res = decoder.ignore_value().await;
+
         if let Ok(end_length) = expected {
             res.unwrap();
             assert_eq!(decoder.buffer.len(), end_length);
@@ -1307,7 +1280,7 @@ mod tests {
     #[test_case("", Err(Error::unexpected_end()); "unexpected end")]
     #[tokio::test]
     async fn test_ignore_number(source: &str, expected: Result<usize, Error>) {
-        let decoder = test_decoder(source);
+        let mut decoder = test_decoder(source);
         let res = decoder.ignore_number().await;
 
         if let Ok(end_length) = expected {
@@ -1329,13 +1302,7 @@ mod tests {
     #[test_case(r#"["test""test"]"#, Err(Error::invalid_utf8("invalid char 34, expected , or ]")); "no comma")]
     #[tokio::test]
     async fn test_ignore_array(source: &str, expected: Result<usize, Error>) {
-        let chunk_size = max(source.len(), 1);
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(chunk_size)
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        let mut decoder = Decoder::from_stream(source);
+        let mut decoder = test_decoder(source);
         let res = decoder.ignore_array().await;
 
         match expected {
@@ -1357,12 +1324,7 @@ mod tests {
     #[test_case(r#"{,"k":"v"}"#, Err(Error::invalid_utf8("invalid char 107, expected 58")); "comma when expecting value")]
     #[tokio::test]
     async fn test_ignore_object(source: &str, expected: Result<usize, Error>) {
-        let source = stream::iter(source.as_bytes().iter().copied())
-            .chunks(source.len())
-            .map(Bytes::from)
-            .map(Result::<Bytes, Error>::Ok);
-
-        let mut decoder = Decoder::from_stream(source);
+        let mut decoder = test_decoder(source);
         let res = decoder.ignore_object().await;
 
         match expected {
