@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [beta, 1.76.0, 1.65.0]
+        rust: [beta, 1.76.0]
         os: [ubuntu]
         include:
           - rust: stable
