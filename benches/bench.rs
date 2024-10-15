@@ -43,15 +43,17 @@ fn collect_chunks(c: &mut Criterion) {
 
     group.sample_size(10);
     for size in [10, 1 * KB, 10 * KB, 30 * KB, 50 * KB, 100 * KB].iter() {
-        let mut chunks: Vec<Result<Bytes, de::Error>> = DATA
-            .chunks(*size)
-            .map(Bytes::from_static)
-            .map(Result::<Bytes, de::Error>::Ok)
-            .collect();
-
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            b.to_async(FuturesExecutor)
-                .iter(|| test(std::mem::take(&mut chunks)))
+            b.to_async(FuturesExecutor).iter_batched(
+                || {
+                    DATA.chunks(size)
+                        .map(Bytes::from_static)
+                        .map(Result::<Bytes, de::Error>::Ok)
+                        .collect::<Vec<Result<Bytes, de::Error>>>()
+                },
+                |chunks| test(chunks),
+                criterion::BatchSize::LargeInput,
+            );
         });
     }
     group.finish();
@@ -66,17 +68,12 @@ fn all_at_once(c: &mut Criterion) {
     }
 
     c.bench_function("all_at_once", |b| {
-        let mut bytes = Result::<_, de::Error>::Ok(Bytes::from_static(DATA));
-
-        b.to_async(FuturesExecutor)
-            .iter(|| test(take_bytes(&mut bytes)))
+        b.to_async(FuturesExecutor).iter_batched(
+            || Result::<_, de::Error>::Ok(Bytes::from_static(DATA)),
+            |bytes| test(bytes),
+            criterion::BatchSize::LargeInput,
+        );
     });
-}
-
-fn take_bytes(v: &mut Result<Bytes, de::Error>) -> Result<Bytes, de::Error> {
-    let mut h = Result::<_, de::Error>::Ok(Bytes::new());
-    std::mem::swap(v, &mut h);
-    h
 }
 
 criterion_group!(benches, iter_chunks, collect_chunks, all_at_once);
