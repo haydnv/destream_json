@@ -5,7 +5,6 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_recursion::async_recursion;
-use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
 use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
@@ -18,7 +17,7 @@ use crate::constants::*;
 const SNIPPET_LEN: usize = 50;
 
 /// Methods common to any decodable [`Stream`]
-#[async_trait]
+#[trait_variant::make(Send)]
 pub trait Read: Send + Unpin {
     /// Read the next chunk of [`Bytes`] in this [`Stream`].
     async fn next(&mut self) -> Option<Result<Bytes, Error>>;
@@ -32,7 +31,6 @@ pub struct SourceStream<S> {
     source: Fuse<S>,
 }
 
-#[async_trait]
 impl<S: Stream<Item = Result<Bytes, Error>> + Send + Unpin> Read for SourceStream<S> {
     async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         self.source.next().await
@@ -58,7 +56,6 @@ pub struct SourceReader<R: AsyncRead> {
 }
 
 #[cfg(feature = "tokio-io")]
-#[async_trait]
 impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         let mut chunk = Vec::new();
@@ -154,8 +151,7 @@ impl<'a, S: Read + 'a> MapAccess<'a, S> {
     }
 }
 
-#[async_trait]
-impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
+impl<'a, S: Send + Read + 'a> de::MapAccess for MapAccess<'a, S> {
     type Error = Error;
 
     async fn next_key<K: FromStream>(&mut self, context: K::Context) -> Result<Option<K>, Error> {
@@ -223,8 +219,7 @@ impl<'a, S: Read + 'a> SeqAccess<'a, S> {
     }
 }
 
-#[async_trait]
-impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
+impl<'a, S: Send + Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     type Error = Error;
 
     async fn next_element<T: FromStream>(
@@ -253,7 +248,6 @@ impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     }
 }
 
-#[async_trait]
 impl<'a, S: Read + 'a, T: FromStream<Context = ()> + 'a> de::ArrayAccess<T> for SeqAccess<'a, S> {
     type Error = Error;
 
@@ -328,7 +322,7 @@ where
     }
 }
 
-impl<S: Read> Decoder<S> {
+impl<S: Send + Read> Decoder<S> {
     async fn buffer(&mut self) -> Result<(), Error> {
         if let Some(data) = self.source.next().await {
             self.buffer.extend(data?);
@@ -829,8 +823,7 @@ impl<S: Read> Decoder<S> {
     }
 }
 
-#[async_trait]
-impl<S: Read> de::Decoder for Decoder<S> {
+impl<S: Send + Read> de::Decoder for Decoder<S> {
     type Error = Error;
 
     async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {

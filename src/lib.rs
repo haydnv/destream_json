@@ -38,7 +38,6 @@ mod tests {
     use std::fmt;
     use std::marker::PhantomData;
 
-    use async_trait::async_trait;
     use bytes::Bytes;
     use destream::de::{self, ArrayAccess, FromStream};
     use destream::en::IntoStream;
@@ -173,7 +172,6 @@ mod tests {
 
         struct TestVisitor;
 
-        #[async_trait]
         impl destream::de::Visitor for TestVisitor {
             type Value = TestArray;
 
@@ -200,7 +198,6 @@ mod tests {
             }
         }
 
-        #[async_trait]
         impl FromStream for TestArray {
             type Context = ();
 
@@ -357,7 +354,6 @@ mod tests {
         #[derive(Debug, Default, Eq, PartialEq)]
         struct TestMap;
 
-        #[async_trait]
         impl FromStream for TestMap {
             type Context = ();
 
@@ -369,7 +365,6 @@ mod tests {
         #[derive(Debug, Default, Eq, PartialEq)]
         struct TestSeq;
 
-        #[async_trait]
         impl FromStream for TestSeq {
             type Context = ();
 
@@ -383,7 +378,6 @@ mod tests {
             phantom: PhantomData<T>,
         }
 
-        #[async_trait]
         impl<T: Default + Send> de::Visitor for TestVisitor<T> {
             type Value = T;
 
@@ -435,7 +429,6 @@ mod tests {
             None,
         }
 
-        #[async_trait]
         impl FromStream for IgnoredValue {
             type Context = ();
             async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
@@ -494,7 +487,6 @@ mod tests {
             name: String,
         }
 
-        #[async_trait]
         impl FromStream for Class {
             type Context = ();
 
@@ -511,7 +503,6 @@ mod tests {
 
         struct ClassVisitor;
 
-        #[async_trait]
         impl Visitor for ClassVisitor {
             type Value = Class;
 
@@ -581,7 +572,6 @@ mod tests {
             }
         }
 
-        #[async_trait]
         impl FromStream for Entry {
             type Context = ();
 
@@ -598,7 +588,6 @@ mod tests {
 
         struct EntryVisitor;
 
-        #[async_trait]
         impl Visitor for EntryVisitor {
             type Value = Entry;
 
