@@ -325,7 +325,7 @@ where
     }
 }
 
-impl<S: Send + Read> Decoder<S> {
+impl<S: Read> Decoder<S> {
     async fn buffer(&mut self) -> Result<(), Error> {
         if let Some(data) = self.source.next().await {
             self.buffer.extend(data?);
