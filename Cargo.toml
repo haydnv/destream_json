@@ -17,15 +17,11 @@ tokio-io = ["tokio/io-util"]
 value = ["number-general/stream"]
 all = ["tokio-io", "value"]
 
-[patch.crates-io]
-destream = { path = "../destream" }
-number-general = { path = "../number-general" }
-
 [dependencies]
 async-recursion = "1.1"
 base64 = "0.22"
 bytes = "1.7"
-destream = {version="0.9"}
+destream = "0.9"
 futures = "0.3"
 number-general = { version = "0.13", optional = true }
 pin-project = "1.1"

@@ -21,7 +21,7 @@ const SNIPPET_LEN: usize = 50;
 
 /// Methods common to any decodable [`Stream`]
 #[trait_variant::make(Send)]
-pub trait Read: Send + Unpin {
+pub trait Read: Unpin {
     /// Read the next chunk of [`Bytes`] in this [`Stream`].
     async fn next(&mut self) -> Option<Result<Bytes, Error>>;
 
@@ -154,7 +154,7 @@ impl<'a, S: Read + 'a> MapAccess<'a, S> {
     }
 }
 
-impl<'a, S: Send + Read + 'a> de::MapAccess for MapAccess<'a, S> {
+impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
     type Error = Error;
 
     async fn next_key<K: FromStream>(&mut self, context: K::Context) -> Result<Option<K>, Error> {
@@ -222,7 +222,7 @@ impl<'a, S: Read + 'a> SeqAccess<'a, S> {
     }
 }
 
-impl<'a, S: Send + Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
+impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     type Error = Error;
 
     async fn next_element<T: FromStream>(
@@ -826,7 +826,7 @@ impl<S: Send + Read> Decoder<S> {
     }
 }
 
-impl<S: Send + Read> de::Decoder for Decoder<S> {
+impl<S: Read> de::Decoder for Decoder<S> {
     type Error = Error;
 
     async fn decode_any<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
