@@ -3,6 +3,7 @@ use std::fmt;
 
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
+use futures::FutureExt;
 use number_general::Number;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -159,7 +160,7 @@ impl FromStream for Value {
     type Context = ();
 
     async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_any(ValueVisitor).await
+        decoder.decode_any(ValueVisitor).boxed().await
     }
 }
 
