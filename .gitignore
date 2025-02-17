@@ -15,3 +15,7 @@ Cargo.lock
 
 # Test files
 .tmp
+
+lcov.info
+
+.DS_Store

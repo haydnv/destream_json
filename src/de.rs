@@ -5,10 +5,12 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_recursion::async_recursion;
-use async_trait::async_trait;
 use bytes::{BufMut, Bytes};
 use destream::{de, FromStream, Visitor};
-use futures::stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt};
+use futures::{
+    stream::{Fuse, FusedStream, Stream, StreamExt, TryStreamExt},
+    FutureExt as _,
+};
 
 #[cfg(feature = "tokio-io")]
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
@@ -18,7 +20,7 @@ use crate::constants::*;
 const SNIPPET_LEN: usize = 50;
 
 /// Methods common to any decodable [`Stream`]
-#[async_trait]
+#[trait_variant::make(Send)]
 pub trait Read: Send + Unpin {
     /// Read the next chunk of [`Bytes`] in this [`Stream`].
     async fn next(&mut self) -> Option<Result<Bytes, Error>>;
@@ -32,7 +34,6 @@ pub struct SourceStream<S> {
     source: Fuse<S>,
 }
 
-#[async_trait]
 impl<S: Stream<Item = Result<Bytes, Error>> + Send + Unpin> Read for SourceStream<S> {
     async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         self.source.next().await
@@ -58,7 +59,6 @@ pub struct SourceReader<R: AsyncRead> {
 }
 
 #[cfg(feature = "tokio-io")]
-#[async_trait]
 impl<R: AsyncRead + Send + Unpin> Read for SourceReader<R> {
     async fn next(&mut self) -> Option<Result<Bytes, Error>> {
         let mut chunk = Vec::new();
@@ -154,7 +154,6 @@ impl<'a, S: Read + 'a> MapAccess<'a, S> {
     }
 }
 
-#[async_trait]
 impl<'a, S: Read + 'a> de::MapAccess for MapAccess<'a, S> {
     type Error = Error;
 
@@ -223,7 +222,6 @@ impl<'a, S: Read + 'a> SeqAccess<'a, S> {
     }
 }
 
-#[async_trait]
 impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     type Error = Error;
 
@@ -253,7 +251,6 @@ impl<'a, S: Read + 'a> de::SeqAccess for SeqAccess<'a, S> {
     }
 }
 
-#[async_trait]
 impl<'a, S: Read + 'a, T: FromStream<Context = ()> + 'a> de::ArrayAccess<T> for SeqAccess<'a, S> {
     type Error = Error;
 
@@ -829,7 +826,6 @@ impl<S: Read> Decoder<S> {
     }
 }
 
-#[async_trait]
 impl<S: Read> de::Decoder for Decoder<S> {
     type Error = Error;
 
@@ -952,7 +948,10 @@ impl<S: Read> de::Decoder for Decoder<S> {
 
     async fn decode_array_bool<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_bool(access).await
+        // was getting an error about S not living long enough, so boxed based on
+        // https://github.com/rust-lang/rust/issues/100013#issuecomment-2052045872
+        // once this issue is closed, we can remove the `.boxed()`
+        visitor.visit_array_bool(access).boxed().await
     }
 
     async fn decode_array_i8<V: Visitor>(
@@ -960,7 +959,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_bool(access).await
+        visitor.visit_array_bool(access).boxed().await
     }
 
     async fn decode_array_i16<V: Visitor>(
@@ -968,7 +967,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_i16(access).await
+        visitor.visit_array_i16(access).boxed().await
     }
 
     async fn decode_array_i32<V: Visitor>(
@@ -976,7 +975,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_i32(access).await
+        visitor.visit_array_i32(access).boxed().await
     }
 
     async fn decode_array_i64<V: Visitor>(
@@ -984,7 +983,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_i64(access).await
+        visitor.visit_array_i64(access).boxed().await
     }
 
     async fn decode_array_u8<V: Visitor>(
@@ -992,7 +991,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_u8(access).await
+        visitor.visit_array_u8(access).boxed().await
     }
 
     async fn decode_array_u16<V: Visitor>(
@@ -1000,7 +999,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_u16(access).await
+        visitor.visit_array_u16(access).boxed().await
     }
 
     async fn decode_array_u32<V: Visitor>(
@@ -1008,7 +1007,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_u32(access).await
+        visitor.visit_array_u32(access).boxed().await
     }
 
     async fn decode_array_u64<V: Visitor>(
@@ -1016,7 +1015,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_u64(access).await
+        visitor.visit_array_u64(access).boxed().await
     }
 
     async fn decode_array_f32<V: Visitor>(
@@ -1024,7 +1023,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_f32(access).await
+        visitor.visit_array_f32(access).boxed().await
     }
 
     async fn decode_array_f64<V: Visitor>(
@@ -1032,7 +1031,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<<V as Visitor>::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_array_f64(access).await
+        visitor.visit_array_f64(access).boxed().await
     }
 
     async fn decode_string<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -1059,7 +1058,7 @@ impl<S: Read> de::Decoder for Decoder<S> {
 
     async fn decode_seq<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let access = SeqAccess::new(self, None).await?;
-        visitor.visit_seq(access).await
+        visitor.visit_seq(access).boxed().await
     }
 
     async fn decode_unit<V: Visitor>(
@@ -1084,12 +1083,12 @@ impl<S: Read> de::Decoder for Decoder<S> {
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
         let access = SeqAccess::new(self, Some(len)).await?;
-        visitor.visit_seq(access).await
+        visitor.visit_seq(access).boxed().await
     }
 
     async fn decode_map<V: Visitor>(&mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let access = MapAccess::new(self, None).await?;
-        visitor.visit_map(access).await
+        visitor.visit_map(access).boxed().await
     }
 
     async fn decode_ignored_any<V: Visitor>(

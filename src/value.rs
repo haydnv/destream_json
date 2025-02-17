@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use async_trait::async_trait;
 use destream::de::{self, Decoder, FromStream, MapAccess, SeqAccess, Visitor};
 use destream::en::{Encoder, IntoStream, ToStream};
+use futures::FutureExt;
 use number_general::Number;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -68,7 +68,6 @@ impl From<String> for Value {
 
 struct ValueVisitor;
 
-#[async_trait]
 impl Visitor for ValueVisitor {
     type Value = Value;
 
@@ -157,12 +156,11 @@ impl Visitor for ValueVisitor {
     }
 }
 
-#[async_trait]
 impl FromStream for Value {
     type Context = ();
 
     async fn from_stream<D: Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_any(ValueVisitor).await
+        decoder.decode_any(ValueVisitor).boxed().await
     }
 }
 
