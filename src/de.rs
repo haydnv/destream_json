@@ -21,7 +21,7 @@ const SNIPPET_LEN: usize = 50;
 
 /// Methods common to any decodable [`Stream`]
 #[trait_variant::make(Send)]
-pub trait Read: Unpin {
+pub trait Read: Send + Unpin {
     /// Read the next chunk of [`Bytes`] in this [`Stream`].
     async fn next(&mut self) -> Option<Result<Bytes, Error>>;
 
